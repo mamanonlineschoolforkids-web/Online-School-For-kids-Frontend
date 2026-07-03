@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
-import { useParams, useNavigate, useSearchParams, Link } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft, Loader2, AlertCircle, Layers, PlayCircle, Users, Star,
   Eye, EyeOff, Video, Plus, Scissors, Pencil, HelpCircle,
-  FileText, ChevronRight, MoreVertical, Trash2, Upload,
+  ChevronRight, Trash2, Youtube, Clapperboard,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,50 +18,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useToast } from "@/hooks/use-toast";
-import api from "@/services/api";
+import { courseService, CourseManagementDetailDto, ManagementSectionDto } from "@/services/courseService";
+import { videoProcessingService } from "@/services/videoProcessingService";
 import CourseSettingsTab from "@/components/ui/CourseSettingsTab";
-
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface ManagementLesson {
-  id: string;
-  title: string;
-  duration: number;
-  order: number;
-  isFree: boolean;
-  isPublished: boolean;
-  hasVideo: boolean;
-  materialsCount: number;
-  hasQuiz: boolean;
-}
-
-interface ManagementSection {
-  id: string;
-  title: string;
-  description: string | null;
-  order: number;
-  lessons: ManagementLesson[];
-}
-
-interface CourseManagementDetail {
-  id: string;
-  title: string;
-  description: string;
-  categoryId: string;
-  thumbnailUrl: string;
-  price: number;
-  discountPrice: number | null;
-  ageGroup: string;
-  language: string;
-  isPublished: boolean;
-  rating: number;
-  totalStudents: number;
-  totalSections: number;
-  totalLessons: number;
-  createdAt: string;
-  updatedAt: string | null;
-  sections: ManagementSection[];
-}
 
 function formatDuration(seconds: number) {
   if (seconds <= 0) return "0:00";
@@ -83,10 +42,10 @@ function SectionDialog({
   onClose: () => void;
   courseId: string;
   onSaved: () => void;
-  existing?: ManagementSection;
+  existing?: ManagementSectionDto;
 }) {
   const { toast } = useToast();
-  const [title, setTitle]   = useState(existing?.title ?? "");
+  const [title, setTitle] = useState(existing?.title ?? "");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => { setTitle(existing?.title ?? ""); }, [existing]);
@@ -96,9 +55,13 @@ function SectionDialog({
     setSaving(true);
     try {
       if (existing) {
-        await api.put(`/coursecreator/sections/${courseId}/${existing.id}`, { title });
+        await courseService.updateSection(courseId, existing.id, {
+          title,
+          description: existing.description ?? "",
+          order: existing.order,
+        });
       } else {
-        await api.post("/coursecreator/sections", { courseId, title, description: "", order: 0 });
+        await courseService.createSection({ courseId, title, order: 0 });
       }
       toast({ title: existing ? "Section updated" : "Section created" });
       onSaved();
@@ -138,139 +101,171 @@ function SectionDialog({
   );
 }
 
-// ── Dialog: Choose how to add lesson content ──────────────────────────────────
+// ── Dialog: Choose how to add a lesson (4 options) ────────────────────────────
+
+type AddLessonStep = "choose" | "youtube-link";
+type AddLessonOption = "chunked-upload" | "chunked-youtube" | "single-upload" | "single-youtube";
 
 function AddLessonDialog({
   open,
   onClose,
   courseId,
   sectionId,
-  nextOrder,
-  onCreated,
 }: {
   open: boolean;
   onClose: () => void;
   courseId: string;
   sectionId: string;
-  nextOrder: number;
-  onCreated: () => void;
 }) {
-  const navigate  = useNavigate();
+  const navigate = useNavigate();
   const { toast } = useToast();
-  const [title, setTitle]   = useState("");
-  const [creating, setCreating] = useState(false);
-  const [step, setStep]     = useState<"name" | "choose">("name");
-  const [lessonId, setLessonId] = useState<string | null>(null);
+  const [step, setStep] = useState<AddLessonStep>("choose");
+  const [pendingOption, setPendingOption] = useState<AddLessonOption | null>(null);
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [starting, setStarting] = useState(false);
 
-  const reset = () => { setTitle(""); setStep("name"); setLessonId(null); };
+  const reset = () => {
+    setStep("choose");
+    setPendingOption(null);
+    setYoutubeUrl("");
+  };
 
   const handleClose = () => { reset(); onClose(); };
 
-  // Step 1: create lesson shell with title
-  const handleCreateShell = async () => {
-    if (!title.trim()) return;
-    setCreating(true);
+  const isValidYoutubeUrl = (url: string) =>
+    /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[\w-]{11}/.test(url);
+
+  const handleFilePicked = async (option: "chunked-upload" | "single-upload", file: File) => {
+    setStarting(true);
     try {
-      const res = await api.post("/coursecreator/lessons", {
-        courseId,
-        sectionId,
-        title: title.trim(),
-        order: nextOrder,
+      if (option === "chunked-upload") {
+        const jobId = await videoProcessingService.startChunkedFromUpload(courseId, sectionId, file);
+        navigate(`/creator/courses/${courseId}/chunk-review/${jobId}`);
+      } else {
+        const jobId = await videoProcessingService.startSingleFromUpload(courseId, sectionId, file);
+        navigate(`/creator/courses/${courseId}/single-lesson-review/${jobId}`);
+      }
+      handleClose();
+    } catch (err: any) {
+      toast({
+        title: "Processing failed",
+        description: err?.response?.data?.message,
+        variant: "destructive",
       });
-      // Backend should return the new lessonId
-      const newId: string = res.data?.data?.lessonId ?? res.data?.data?.id ?? "";
-      setLessonId(newId);
-      setStep("choose");
-      onCreated(); // refresh parent
-    } catch {
-      toast({ title: "Failed to create lesson", variant: "destructive" });
     } finally {
-      setCreating(false);
+      setStarting(false);
+    }
+  };
+
+  const handleYoutubeSubmit = async () => {
+    if (!pendingOption || !isValidYoutubeUrl(youtubeUrl)) {
+      toast({ title: "Enter a valid YouTube URL", variant: "destructive" });
+      return;
+    }
+    setStarting(true);
+    try {
+      if (pendingOption === "chunked-youtube") {
+        const jobId = await videoProcessingService.startChunkedFromYoutube(courseId, sectionId, youtubeUrl);
+        navigate(`/creator/courses/${courseId}/chunk-review/${jobId}`);
+      } else {
+        const jobId = await videoProcessingService.startSingleFromYoutube(courseId, sectionId, youtubeUrl);
+        navigate(`/creator/courses/${courseId}/single-lesson-review/${jobId}`);
+      }
+      handleClose();
+    } catch (err: any) {
+      toast({
+        title: "Processing failed",
+        description: err?.response?.data?.message,
+        variant: "destructive",
+      });
+    } finally {
+      setStarting(false);
     }
   };
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {step === "name" ? "Name Your Lesson" : "Add Content"}
+            {step === "choose" ? "Add Lesson Content" : "Paste YouTube Link"}
           </DialogTitle>
         </DialogHeader>
-
-        {step === "name" && (
-          <>
-            <div className="space-y-3 py-2">
-              <Label>Lesson Title *</Label>
-              <Input
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Introduction to Variables"
-                onKeyDown={(e) => e.key === "Enter" && handleCreateShell()}
-                autoFocus
-              />
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={handleClose}>Cancel</Button>
-              <Button onClick={handleCreateShell} disabled={creating || !title.trim()}>
-                {creating && <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />}
-                Next
-              </Button>
-            </DialogFooter>
-          </>
-        )}
 
         {step === "choose" && (
           <div className="space-y-3 py-2">
             <p className="text-sm text-muted-foreground">
-              How do you want to add content to <strong>"{title}"</strong>?
+              How do you want to add content to this section?
             </p>
 
-            {/* Option A: Single lesson video */}
-            <button
-              onClick={() => {
-                handleClose();
-                navigate(
-                  `/creator/courses/${courseId}/sections/${sectionId}/lessons/${lessonId ?? "new"}` +
-                  `?title=${encodeURIComponent(title)}&order=${nextOrder}`
-                );
-              }}
-              className="w-full flex items-start gap-4 border rounded-xl p-4 hover:border-primary hover:bg-primary/5 transition-colors text-left"
-            >
-              <div className="bg-primary/10 rounded-lg p-2.5 shrink-0">
-                <Upload className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="font-semibold text-sm">Upload a single video</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  This video becomes one lesson. The AI transcribes it and you
-                  generate quizzes — all in one editor.
-                </p>
-              </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5 ml-auto" />
-            </button>
+            <OptionRow
+              icon={<Scissors className="h-5 w-5 text-violet-600" />}
+              iconBg="bg-violet-100"
+              title="Upload a long video (split into lessons)"
+              description="The AI transcribes and splits your video into multiple chunks. You adjust each chunk's boundaries, then generate a quiz for each one."
+              disabled={starting}
+              onFile={(file) => handleFilePicked("chunked-upload", file)}
+              accept="video/*"
+            />
 
-            {/* Option B: Big video → chunks */}
-            <button
-              onClick={() => {
-                handleClose();
-                navigate(`/creator/courses/${courseId}/chunk-editor`);
-              }}
-              className="w-full flex items-start gap-4 border rounded-xl p-4 hover:border-primary hover:bg-primary/5 transition-colors text-left"
-            >
-              <div className="bg-violet-100 rounded-lg p-2.5 shrink-0">
-                <Scissors className="h-5 w-5 text-violet-600" />
-              </div>
-              <div>
-                <p className="font-semibold text-sm">Upload a long video and chunk it</p>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  The AI splits your video into multiple lessons. You drag cut
-                  points on the timeline to adjust boundaries, then each chunk
-                  becomes its own lesson.
-                </p>
-              </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5 ml-auto" />
-            </button>
+            <OptionRow
+              icon={<Youtube className="h-5 w-5 text-red-600" />}
+              iconBg="bg-red-100"
+              title="Paste a long YouTube link (split into lessons)"
+              description="Same as above, but from a YouTube video instead of an upload."
+              disabled={starting}
+              onClick={() => { setPendingOption("chunked-youtube"); setStep("youtube-link"); }}
+            />
+
+            <OptionRow
+              icon={<Clapperboard className="h-5 w-5 text-primary" />}
+              iconBg="bg-primary/10"
+              title="Upload a short video (one lesson)"
+              description="This video becomes a single lesson. The AI transcribes it — no splitting — then you generate its quiz."
+              disabled={starting}
+              onFile={(file) => handleFilePicked("single-upload", file)}
+              accept="video/*"
+            />
+
+            <OptionRow
+              icon={<Youtube className="h-5 w-5 text-red-600" />}
+              iconBg="bg-red-100"
+              title="Paste a short YouTube link (one lesson)"
+              description="Same as above, but from a YouTube video instead of an upload."
+              disabled={starting}
+              onClick={() => { setPendingOption("single-youtube"); setStep("youtube-link"); }}
+            />
+          </div>
+        )}
+
+        {step === "youtube-link" && (
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="yt-url">YouTube URL</Label>
+              <Input
+                id="yt-url"
+                placeholder="https://www.youtube.com/watch?v=..."
+                value={youtubeUrl}
+                onChange={(e) => setYoutubeUrl(e.target.value)}
+                disabled={starting}
+                autoFocus
+              />
+              {youtubeUrl && !isValidYoutubeUrl(youtubeUrl) && (
+                <p className="text-xs text-destructive">Please enter a valid YouTube URL.</p>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setStep("choose")} disabled={starting}>
+                Back
+              </Button>
+              <Button
+                onClick={handleYoutubeSubmit}
+                disabled={starting || !isValidYoutubeUrl(youtubeUrl)}
+              >
+                {starting && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+                Continue
+              </Button>
+            </DialogFooter>
           </div>
         )}
       </DialogContent>
@@ -278,37 +273,96 @@ function AddLessonDialog({
   );
 }
 
+// ── Sub-component: one selectable row in the AddLessonDialog ──────────────────
+
+function OptionRow({
+  icon,
+  iconBg,
+  title,
+  description,
+  disabled,
+  onClick,
+  onFile,
+  accept,
+}: {
+  icon: React.ReactNode;
+  iconBg: string;
+  title: string;
+  description: string;
+  disabled?: boolean;
+  onClick?: () => void;
+  onFile?: (file: File) => void;
+  accept?: string;
+}) {
+  const inputId = `option-file-${title.replace(/\s+/g, "-")}`;
+
+  const content = (
+    <>
+      <div className={`${iconBg} rounded-lg p-2.5 shrink-0`}>{icon}</div>
+      <div>
+        <p className="font-semibold text-sm">{title}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+      </div>
+      <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5 ml-auto" />
+    </>
+  );
+
+  const className =
+    "w-full flex items-start gap-4 border rounded-xl p-4 hover:border-primary hover:bg-primary/5 transition-colors text-left disabled:opacity-50 disabled:pointer-events-none";
+
+  if (onFile) {
+    return (
+      <label htmlFor={inputId} className={`${className} cursor-pointer block`}>
+        <input
+          id={inputId}
+          type="file"
+          accept={accept}
+          className="hidden"
+          disabled={disabled}
+          onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }}
+        />
+        <div className="flex items-start gap-4">{content}</div>
+      </label>
+    );
+  }
+
+  return (
+    <button onClick={onClick} disabled={disabled} className={className}>
+      {content}
+    </button>
+  );
+}
+
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function CourseDetailManagementPage() {
-  const { courseId }  = useParams<{ courseId: string }>();
-  const navigate      = useNavigate();
-  const { toast }     = useToast();
+  const { courseId } = useParams<{ courseId: string }>();
+  const navigate = useNavigate();
+  const { toast } = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [course, setCourse]   = useState<CourseManagementDetail | null>(null);
+  const [course, setCourse] = useState<CourseManagementDetailDto | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError]     = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const activeTab = searchParams.get("tab") ?? "overview";
 
-  // Dialogs
   const [sectionDialog, setSectionDialog] = useState<{
-    open: boolean; existing?: ManagementSection;
+    open: boolean; existing?: ManagementSectionDto;
   }>({ open: false });
 
   const [lessonDialog, setLessonDialog] = useState<{
-    open: boolean; sectionId: string; nextOrder: number;
-  }>({ open: false, sectionId: "", nextOrder: 1 });
+    open: boolean; sectionId: string;
+  }>({ open: false, sectionId: "" });
 
   // ── Fetch ──────────────────────────────────────────────────────────────────
 
   const fetchCourse = () => {
     if (!courseId) return;
     setLoading(true);
-    api
-      .get(`/coursecreator/courses/${courseId}/management`)
-      .then((res) => setCourse(res.data?.data ?? null))
+    courseService
+      .getCourseManagementDetail(courseId)
+      .then(setCourse)
       .catch(() => setError("Could not load this course."))
       .finally(() => setLoading(false));
   };
@@ -318,11 +372,22 @@ export default function CourseDetailManagementPage() {
   const handleDeleteSection = async (sectionId: string) => {
     if (!window.confirm("Delete this section and all its lessons?")) return;
     try {
-      await api.delete(`/coursecreator/sections/${courseId}/${sectionId}`);
+      await courseService.deleteSection(courseId!, sectionId);
       toast({ title: "Section deleted" });
       fetchCourse();
     } catch {
       toast({ title: "Failed to delete section", variant: "destructive" });
+    }
+  };
+
+  const handleDeleteLesson = async (sectionId: string, lessonId: string) => {
+    if (!window.confirm("Delete this lesson?")) return;
+    try {
+      await courseService.deleteLesson(courseId!, sectionId, lessonId);
+      toast({ title: "Lesson deleted" });
+      fetchCourse();
+    } catch {
+      toast({ title: "Failed to delete lesson", variant: "destructive" });
     }
   };
 
@@ -355,13 +420,11 @@ export default function CourseDetailManagementPage() {
     <DashboardLayout>
       <div className="space-y-6">
 
-        {/* Back */}
         <Button variant="ghost" size="sm" className="-ml-2"
           onClick={() => navigate("/creator/my-courses")}>
           <ArrowLeft className="h-4 w-4 mr-2" />My Courses
         </Button>
 
-        {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2">
@@ -375,7 +438,9 @@ export default function CourseDetailManagementPage() {
                   : <><EyeOff className="h-3 w-3 mr-1" />Draft</>}
               </Badge>
             </div>
-            <p className="text-muted-foreground max-w-2xl">{course.description}</p>
+            {course.subtitle && (
+              <p className="text-muted-foreground max-w-2xl">{course.subtitle}</p>
+            )}
             <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
               <span className="flex items-center gap-1">
                 <Layers className="h-4 w-4" /> {course.totalSections} sections
@@ -395,14 +460,12 @@ export default function CourseDetailManagementPage() {
             </div>
           </div>
 
-          {/* Preview button */}
           <Button variant="outline" onClick={() => navigate(`/creator/courses/${courseId}/preview`)}>
             <Eye className="h-4 w-4 mr-2" />
             Preview & Publish
           </Button>
         </div>
 
-        {/* Tabs */}
         <Tabs value={activeTab} onValueChange={(tab) => setSearchParams({ tab })} className="space-y-6">
           <TabsList className="grid w-full grid-cols-3 max-w-lg">
             <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -431,12 +494,24 @@ export default function CourseDetailManagementPage() {
                 <p className="text-lg font-medium">{course.ageGroup}</p>
               </div>
             </div>
+
+            {course.whatYoullLearn.length > 0 && (
+              <div className="border rounded-lg p-4">
+                <p className="text-sm font-semibold mb-2">What students will learn</p>
+                <ul className="space-y-1 text-sm text-muted-foreground">
+                  {course.whatYoullLearn.map((item, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span className="text-primary">•</span>{item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </TabsContent>
 
           {/* ── Curriculum ── */}
           <TabsContent value="curriculum" className="space-y-4">
 
-            {/* Add section button */}
             <div className="flex justify-end">
               <Button size="sm" onClick={() => setSectionDialog({ open: true })}>
                 <Plus className="h-4 w-4 mr-1.5" />
@@ -467,22 +542,41 @@ export default function CourseDetailManagementPage() {
                           <span className="text-sm text-muted-foreground">
                             {section.lessons.length} lessons
                           </span>
-                          {/* Section actions */}
-                          <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-                            <Button
-                              variant="ghost" size="sm"
-                              className="h-7 w-7 p-0"
-                              onClick={() => setSectionDialog({ open: true, existing: section })}
+                          <div className="flex gap-1">
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSectionDialog({ open: true, existing: section });
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.stopPropagation();
+                                  setSectionDialog({ open: true, existing: section });
+                                }
+                              }}
+                              className="h-7 w-7 p-0 inline-flex items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground cursor-pointer"
                             >
                               <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost" size="sm"
-                              className="h-7 w-7 p-0 text-destructive"
-                              onClick={() => handleDeleteSection(section.id)}
+                            </div>
+                            <div
+                              role="button"
+                              tabIndex={0}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteSection(section.id);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.stopPropagation();
+                                  handleDeleteSection(section.id);
+                                }
+                              }}
+                              className="h-7 w-7 p-0 inline-flex items-center justify-center rounded-md text-destructive hover:bg-destructive/10 cursor-pointer"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -495,54 +589,64 @@ export default function CourseDetailManagementPage() {
                         </p>
                       ) : (
                         <ul className="divide-y divide-border">
-                          {section.lessons.map((lesson) => (
-                            <li key={lesson.id}
-                              className="flex items-center justify-between px-4 py-3">
-                              <div className="flex items-center gap-3">
-                                {lesson.hasVideo
-                                  ? <PlayCircle className="h-4 w-4 text-accent" />
-                                  : <Video className="h-4 w-4 text-muted-foreground" />}
-                                <span className="text-sm">{lesson.title}</span>
-                                {lesson.isFree && (
-                                  <Badge variant="secondary" className="text-xs">Free</Badge>
-                                )}
-                                {!lesson.isPublished && (
-                                  <Badge variant="secondary" className="text-xs bg-muted">Draft</Badge>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                                {lesson.hasQuiz && (
-                                  <span className="flex items-center gap-1">
-                                    <HelpCircle className="h-3.5 w-3.5" /> Quiz
-                                  </span>
-                                )}
-                                <span>{formatDuration(lesson.duration)}</span>
-                                <Button
-                                  variant="ghost" size="sm"
-                                  className="h-7 w-7 p-0"
-                                  onClick={() => navigate(
-                                    `/creator/courses/${courseId}/sections/${section.id}/lessons/${lesson.id}`
+                          {section.lessons.map((lesson) => {
+                            // Derived from full quiz content, not a removed
+                            // quizDifficulties field — counts only difficulty
+                            // levels that actually have at least one question.
+                            const quizLevelsWithContent = lesson.quizzes.filter(
+                              (q) => q.questions.length > 0
+                            ).length;
+
+                            return (
+                              <li key={lesson.id}
+                                className="flex items-center justify-between px-4 py-3">
+                                <div className="flex items-center gap-3">
+                                  {lesson.hasVideo
+                                    ? <PlayCircle className="h-4 w-4 text-accent" />
+                                    : <Video className="h-4 w-4 text-muted-foreground" />}
+                                  <span className="text-sm">{lesson.title}</span>
+                                  {lesson.isFree && (
+                                    <Badge variant="secondary" className="text-xs">Free</Badge>
                                   )}
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </Button>
-                              </div>
-                            </li>
-                          ))}
+                                  {!lesson.isPublished && (
+                                    <Badge variant="secondary" className="text-xs bg-muted">Draft</Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                                  {lesson.hasQuiz && (
+                                    <span className="flex items-center gap-1">
+                                      <HelpCircle className="h-3.5 w-3.5" />
+                                      {quizLevelsWithContent}/3
+                                    </span>
+                                  )}
+                                  <span>{formatDuration(lesson.duration)}</span>
+                                  <Button
+                                    variant="ghost" size="sm"
+                                    className="h-7 w-7 p-0"
+                                    onClick={() => navigate(
+                                      `/creator/courses/${courseId}/sections/${section.id}/lessons/${lesson.id}`
+                                    )}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5" />
+                                  </Button>
+                                  <Button
+                                    variant="ghost" size="sm"
+                                    className="h-7 w-7 p-0 text-destructive"
+                                    onClick={() => handleDeleteLesson(section.id, lesson.id)}
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </Button>
+                                </div>
+                              </li>
+                            );
+                          })}
                         </ul>
                       )}
 
-                      {/* Add lesson button */}
                       <div className="px-4 py-3 border-t">
                         <Button
                           variant="outline" size="sm"
-                          onClick={() =>
-                            setLessonDialog({
-                              open: true,
-                              sectionId: section.id,
-                              nextOrder: section.lessons.length + 1,
-                            })
-                          }
+                          onClick={() => setLessonDialog({ open: true, sectionId: section.id })}
                         >
                           <Plus className="h-3.5 w-3.5 mr-1.5" />
                           Add Lesson
@@ -562,7 +666,6 @@ export default function CourseDetailManagementPage() {
         </Tabs>
       </div>
 
-      {/* Dialogs */}
       <SectionDialog
         open={sectionDialog.open}
         onClose={() => setSectionDialog({ open: false })}
@@ -573,11 +676,9 @@ export default function CourseDetailManagementPage() {
 
       <AddLessonDialog
         open={lessonDialog.open}
-        onClose={() => setLessonDialog({ open: false, sectionId: "", nextOrder: 1 })}
+        onClose={() => setLessonDialog({ open: false, sectionId: "" })}
         courseId={courseId!}
         sectionId={lessonDialog.sectionId}
-        nextOrder={lessonDialog.nextOrder}
-        onCreated={fetchCourse}
       />
     </DashboardLayout>
   );

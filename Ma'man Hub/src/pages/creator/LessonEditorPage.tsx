@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,73 +7,32 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
-  ArrowLeft, Upload, Loader2, AlertCircle, CheckCircle2,
-  Sparkles, Save, Play, FileText, HelpCircle, RefreshCw,
-  Pencil, Trash2, Plus, ChevronDown, ChevronUp, X,
+  ArrowLeft, Loader2, AlertCircle, CheckCircle2, Save,
+  ChevronDown, ChevronUp, Plus, Trash2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import api from "@/services/api";
-
-// ── Types ─────────────────────────────────────────────────────────────────────
+import { courseService, ManagementLessonDto, QuizQuestionDraft } from "@/services/courseService";
+import { MaterialsManager } from "@/components/lesson/MaterialsManager";
 
 type Difficulty = "easy" | "medium" | "hard";
 
-interface QuizQuestion {
-  question: string;
-  options: string[];
-  correctAnswer: number;
-  explanation: string;
-}
-
-interface DifficultyQuiz {
-  difficulty: Difficulty;
-  questions: QuizQuestion[];
-  generating: boolean;
-  generated: boolean;
-}
-
 const DIFFICULTIES: Difficulty[] = ["easy", "medium", "hard"];
-
 const DIFF_COLORS: Record<Difficulty, string> = {
-  easy:   "bg-green-100 text-green-700 border-green-200",
+  easy: "bg-green-100 text-green-700 border-green-200",
   medium: "bg-amber-100 text-amber-700 border-amber-200",
-  hard:   "bg-red-100   text-red-700   border-red-200",
+  hard: "bg-red-100 text-red-700 border-red-200",
 };
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/** Strip timestamp lines like "[00:01:23]" from transcript for student display. */
-function stripTimestamps(raw: string): string {
-  return raw
-    .split("\n")
-    .map((line) => line.replace(/^\[[\d:]+\]\s*/, "").trim())
-    .filter(Boolean)
-    .join("\n");
-}
-
-function formatSeconds(s: number) {
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  return `${m}:${sec.toString().padStart(2, "0")}`;
-}
-
-// ── Sub-component: Quiz question editor ───────────────────────────────────────
-
 function QuestionEditor({
-  index,
-  q,
-  onChange,
-  onDelete,
+  index, q, onChange, onDelete,
 }: {
   index: number;
-  q: QuizQuestion;
-  onChange: (q: QuizQuestion) => void;
+  q: QuizQuestionDraft;
+  onChange: (q: QuizQuestionDraft) => void;
   onDelete: () => void;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
 
   return (
     <div className="border rounded-lg overflow-hidden">
@@ -137,7 +96,6 @@ function QuestionEditor({
               onChange={(e) => onChange({ ...q, explanation: e.target.value })}
               rows={2}
               className="text-sm resize-none"
-              placeholder="Why is this the correct answer?"
             />
           </div>
 
@@ -153,260 +111,160 @@ function QuestionEditor({
   );
 }
 
-// ── Main Page ─────────────────────────────────────────────────────────────────
-
 export default function LessonEditorPage() {
   const { courseId, sectionId, lessonId } = useParams<{
-    courseId: string;
-    sectionId: string;
-    lessonId: string;
+    courseId: string; sectionId: string; lessonId: string;
   }>();
-  const navigate  = useNavigate();
+  const navigate = useNavigate();
   const { toast } = useToast();
-  const [searchParams] = useSearchParams();
-  const isNew = lessonId === "new";
 
-  // ── Lesson fields ─────────────────────────────────────────────────────────
-  const [title, setTitle]         = useState(searchParams.get("title") ?? "");
+  const [lesson, setLesson] = useState<ManagementLessonDto | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const [title, setTitle] = useState("");
   const [transcript, setTranscript] = useState("");
-  const [videoUrl, setVideoUrl]   = useState("");
-  const [duration, setDuration]   = useState(0);
-  const [order, setOrder]         = useState(Number(searchParams.get("order") ?? "1"));
-  const [isFree, setIsFree]       = useState(false);
-
-  // ── Video upload ──────────────────────────────────────────────────────────
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploading, setUploading]           = useState(false);
-  const [processing, setProcessing]         = useState(false);
-  const [processStep, setProcessStep]       = useState("");
-  const videoRef  = useRef<HTMLVideoElement>(null);
-  const inputRef  = useRef<HTMLInputElement>(null);
-
-  // ── Quiz state ────────────────────────────────────────────────────────────
-  const [quizzes, setQuizzes] = useState<DifficultyQuiz[]>(
-    DIFFICULTIES.map((d) => ({ difficulty: d, questions: [], generating: false, generated: false }))
-  );
-  const [numQuestions, setNumQuestions] = useState(5);
-  const [activeQuizTab, setActiveQuizTab] = useState<Difficulty>("easy");
-
-  // ── Saving ────────────────────────────────────────────────────────────────
+  const [order, setOrder] = useState(1);
+  const [isFree, setIsFree] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // ── Load existing lesson if editing ──────────────────────────────────────
-  useEffect(() => {
-    if (isNew || !lessonId || !courseId || !sectionId) return;
-    api
-      .get(`/coursecreator/courses/${courseId}/management`)
-      .then((res) => {
-        const section = (res.data?.data?.sections ?? []).find((s: any) => s.id === sectionId);
-        const lesson  = (section?.lessons ?? []).find((l: any) => l.id === lessonId);
-        if (!lesson) return;
-        setTitle(lesson.title ?? "");
-        setTranscript(lesson.description ?? "");
-        setVideoUrl(lesson.videoUrl ?? "");
-        setDuration(lesson.duration ?? 0);
-        setOrder(lesson.order ?? 1);
-        setIsFree(lesson.isFree ?? false);
-        if (lesson.quizzes?.length) {
-          setQuizzes(
-            DIFFICULTIES.map((d) => {
-              const found = lesson.quizzes.find((q: any) => q.difficulty === d);
-              return {
-                difficulty: d,
-                questions: found?.questions ?? [],
-                generating: false,
-                generated: !!found,
-              };
-            })
-          );
+  // Quiz editing state — populated from the saved lesson's real question
+  // content (lesson.quizzes), not just which difficulties exist.
+  const [quizzes, setQuizzes] = useState<Record<Difficulty, QuizQuestionDraft[]>>({
+    easy: [], medium: [], hard: [],
+  });
+  const [activeQuizTab, setActiveQuizTab] = useState<Difficulty>("easy");
+  const [savingQuiz, setSavingQuiz] = useState<Record<Difficulty, boolean>>({
+    easy: false, medium: false, hard: false,
+  });
+
+  // ── Load lesson ──────────────────────────────────────────────────────────
+
+  const fetchLesson = () => {
+    if (!courseId) return;
+    setLoading(true);
+    courseService
+      .getCourseManagementDetail(courseId)
+      .then((detail) => {
+        const section = detail.sections.find((s) => s.id === sectionId);
+        const found = section?.lessons.find((l) => l.id === lessonId);
+        if (!found) {
+          setError("Lesson not found.");
+          return;
         }
+        setLesson(found);
+        setTitle(found.title);
+        setTranscript(found.transcript ?? "");
+        setOrder(found.order);
+        setIsFree(found.isFree);
+
+        const quizMap: Record<Difficulty, QuizQuestionDraft[]> = { easy: [], medium: [], hard: [] };
+        found.quizzes.forEach((q) => {
+          if (q.difficulty === "easy" || q.difficulty === "medium" || q.difficulty === "hard") {
+            quizMap[q.difficulty] = q.questions;
+          }
+        });
+        setQuizzes(quizMap);
       })
-      .catch(() => toast({ title: "Could not load lesson", variant: "destructive" }));
-  }, [lessonId, courseId, sectionId, isNew]);
-
-  // ── Video upload + transcript extraction ──────────────────────────────────
-
-  const handleVideoFile = async (file: File) => {
-    // Show local preview immediately
-    const objectUrl = URL.createObjectURL(file);
-    setVideoUrl(objectUrl);
-    if (videoRef.current) videoRef.current.src = objectUrl;
-
-    setUploading(true);
-    setUploadProgress(0);
-
-    try {
-      // 1. Upload to storage
-      const form = new FormData();
-      form.append("file", file);
-      const uploadRes = await api.post("/upload/video", form, {
-        onUploadProgress: (e) => {
-          if (e.total) setUploadProgress(Math.round((e.loaded / e.total) * 100));
-        },
-      });
-      const storedUrl: string = uploadRes.data?.data?.url ?? objectUrl;
-      setVideoUrl(storedUrl);
-      setUploading(false);
-
-      // 2. Get duration from the video element
-      if (videoRef.current) {
-        setDuration(Math.round(videoRef.current.duration || 0));
-      }
-
-      // 3. Run single-video pipeline (transcript only, no chunking)
-      setProcessing(true);
-      setProcessStep("Extracting audio and transcribing…");
-
-      const pipelineForm = new FormData();
-      pipelineForm.append("file", file);
-      const pipelineRes = await api.post("/videoprocessing/transcript-only", pipelineForm);
-      const rawTranscript: string = pipelineRes.data?.data?.transcript ?? "";
-
-      setTranscript(stripTimestamps(rawTranscript));
-      setProcessStep("");
-      setProcessing(false);
-
-      toast({ title: "Video uploaded and transcribed ✓" });
-    } catch (err: any) {
-      setUploading(false);
-      setProcessing(false);
-      const msg = err?.response?.data?.message ?? "Upload failed";
-      toast({ title: "Error", description: msg, variant: "destructive" });
-    }
+      .catch(() => setError("Could not load this lesson."))
+      .finally(() => setLoading(false));
   };
 
-  // ── Quiz generation ───────────────────────────────────────────────────────
+  useEffect(fetchLesson, [courseId, sectionId, lessonId]);
 
-  const generateQuiz = async (difficulty: Difficulty) => {
-    if (!transcript.trim()) {
-      toast({ title: "Add a transcript first", variant: "destructive" });
-      return;
-    }
+  // ── Save lesson details (title/transcript/order/free) ─────────────────────
 
-    setQuizzes((prev) =>
-      prev.map((q) => q.difficulty === difficulty ? { ...q, generating: true } : q)
-    );
-
-    try {
-      const res = await api.post("/quiz/generate", {
-        lessonName:   title || "Lesson",
-        transcript,
-        difficulty,
-        numQuestions,
-      });
-
-      const questions: QuizQuestion[] = res.data?.data ?? [];
-      setQuizzes((prev) =>
-        prev.map((q) =>
-          q.difficulty === difficulty
-            ? { ...q, generating: false, generated: true, questions }
-            : q
-        )
-      );
-      toast({ title: `${difficulty} quiz generated ✓` });
-    } catch (err: any) {
-      setQuizzes((prev) =>
-        prev.map((q) => q.difficulty === difficulty ? { ...q, generating: false } : q)
-      );
-      toast({ title: "Quiz generation failed", variant: "destructive" });
-    }
-  };
-
-  const generateAll = async () => {
-    for (const d of DIFFICULTIES) {
-      await generateQuiz(d);
-    }
-  };
-
-  const updateQuestion = (difficulty: Difficulty, index: number, q: QuizQuestion) => {
-    setQuizzes((prev) =>
-      prev.map((quiz) =>
-        quiz.difficulty === difficulty
-          ? { ...quiz, questions: quiz.questions.map((old, i) => (i === index ? q : old)) }
-          : quiz
-      )
-    );
-  };
-
-  const deleteQuestion = (difficulty: Difficulty, index: number) => {
-    setQuizzes((prev) =>
-      prev.map((quiz) =>
-        quiz.difficulty === difficulty
-          ? { ...quiz, questions: quiz.questions.filter((_, i) => i !== index) }
-          : quiz
-      )
-    );
-  };
-
-  const addQuestion = (difficulty: Difficulty) => {
-    const blank: QuizQuestion = {
-      question: "",
-      options: ["", "", "", ""],
-      correctAnswer: 0,
-      explanation: "",
-    };
-    setQuizzes((prev) =>
-      prev.map((quiz) =>
-        quiz.difficulty === difficulty
-          ? { ...quiz, questions: [...quiz.questions, blank] }
-          : quiz
-      )
-    );
-  };
-
-  // ── Save everything ───────────────────────────────────────────────────────
-
-  const handleSave = async () => {
+  const handleSaveDetails = async () => {
+    if (!courseId || !sectionId || !lessonId) return;
     if (!title.trim()) {
       toast({ title: "Enter a lesson title", variant: "destructive" });
       return;
     }
-    const readyQuizzes = quizzes.filter((q) => q.questions.length > 0);
-    if (readyQuizzes.length === 0) {
-      toast({ title: "Generate at least one quiz difficulty first", variant: "destructive" });
-      return;
-    }
-
     setSaving(true);
     try {
-      const res = await api.post("/quiz/save-lesson", {
-        courseId,
-        sectionId,
-        lessonId: isNew ? undefined : lessonId,
-        title,
-        transcript,
-        videoUrl,
-        duration,
+      await courseService.updateLesson(courseId, sectionId, lessonId, {
+        title: title.trim(),
+        description: transcript,
+        duration: lesson?.duration ?? 0,
         order,
+        videoUrl: lesson?.videoUrl ?? undefined,
         isFree,
-        quizzes: readyQuizzes.map((q) => ({
-          difficulty: q.difficulty,
-          questions:  q.questions,
-        })),
       });
-
-      toast({ title: "Lesson saved ✓" });
-      // Navigate back to course management
-      navigate(`/creator/courses/${courseId}?tab=curriculum`);
+      toast({ title: "Lesson updated ✓" });
+      fetchLesson();
     } catch (err: any) {
-      const msg = err?.response?.data?.message ?? "Save failed";
-      toast({ title: "Error", description: msg, variant: "destructive" });
+      toast({ title: "Failed to save", description: err?.response?.data?.message, variant: "destructive" });
     } finally {
       setSaving(false);
     }
   };
 
-  // ── Derived ───────────────────────────────────────────────────────────────
-  const allGenerated = quizzes.every((q) => q.generated);
-  const anyGenerating = quizzes.some((q) => q.generating);
+  // ── Quiz editing ─────────────────────────────────────────────────────────
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  const updateQuestion = (difficulty: Difficulty, index: number, updated: QuizQuestionDraft) => {
+    setQuizzes((prev) => ({
+      ...prev,
+      [difficulty]: prev[difficulty].map((q, i) => (i === index ? updated : q)),
+    }));
+  };
+
+  const deleteQuestion = (difficulty: Difficulty, index: number) => {
+    setQuizzes((prev) => ({
+      ...prev,
+      [difficulty]: prev[difficulty].filter((_, i) => i !== index),
+    }));
+  };
+
+  const addQuestion = (difficulty: Difficulty) => {
+    const blank: QuizQuestionDraft = { question: "", options: ["", "", "", ""], correctAnswer: 0, explanation: "" };
+    setQuizzes((prev) => ({ ...prev, [difficulty]: [...prev[difficulty], blank] }));
+  };
+
+  const handleSaveQuiz = async (difficulty: Difficulty) => {
+    if (!courseId || !sectionId || !lessonId) return;
+    setSavingQuiz((p) => ({ ...p, [difficulty]: true }));
+    try {
+      await courseService.updateLessonQuiz(courseId, sectionId, lessonId, difficulty, quizzes[difficulty]);
+      toast({ title: `${difficulty} quiz saved ✓` });
+      fetchLesson();
+    } catch (err: any) {
+      toast({ title: "Failed to save quiz", description: err?.response?.data?.message, variant: "destructive" });
+    } finally {
+      setSavingQuiz((p) => ({ ...p, [difficulty]: false }));
+    }
+  };
+
+  // ── Guards ───────────────────────────────────────────────────────────────
+
+  if (loading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center min-h-[60vh] gap-3 text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <p>Loading lesson…</p>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (error || !lesson) {
+    return (
+      <DashboardLayout>
+        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+          <AlertCircle className="h-10 w-10 text-destructive" />
+          <p className="text-muted-foreground">{error ?? "Lesson not found."}</p>
+          <Button variant="outline" onClick={() => navigate(`/creator/courses/${courseId}?tab=curriculum`)}>
+            Back to Course
+          </Button>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
-      <div className="mx-auto max-w-4xl space-y-6 pb-12">
+      <div className="mx-auto max-w-3xl space-y-6 pb-12">
 
-        {/* Header */}
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={() => navigate(`/creator/courses/${courseId}?tab=curriculum`)}>
             <ArrowLeft className="h-4 w-4 mr-1" />
@@ -415,300 +273,144 @@ export default function LessonEditorPage() {
         </div>
 
         <div>
-          <h1 className="text-2xl font-bold">{isNew ? "New Lesson" : "Edit Lesson"}</h1>
+          <h1 className="text-2xl font-bold">Edit Lesson</h1>
           <p className="text-muted-foreground text-sm">
-            Upload a video, review the transcript, generate quizzes for all difficulty levels, then save.
+            Update this lesson's details, quizzes, and materials.
           </p>
         </div>
 
-        {/* ── Step 1: Lesson basics ── */}
+        {/* Lesson details */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Lesson Details
-            </CardTitle>
+            <CardTitle className="text-base">Lesson Details</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="space-y-1.5">
+              <Label>Title *</Label>
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+            </div>
             <div className="grid sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5 sm:col-span-2">
-                <Label>Lesson Title *</Label>
+              <div className="space-y-1.5 max-w-[140px]">
+                <Label className="text-xs">Order</Label>
                 <Input
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  placeholder="e.g. Introduction to Variables"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Order in Section</Label>
-                <Input
-                  type="number" min={1}
-                  value={order}
+                  type="number" min={1} value={order}
                   onChange={(e) => setOrder(parseInt(e.target.value) || 1)}
                 />
               </div>
-              <div className="flex items-center gap-3 pt-6">
+              <div className="flex items-end gap-2 pb-1.5">
                 <input
-                  type="checkbox"
-                  id="isFree"
+                  type="checkbox" id="isFree"
                   checked={isFree}
                   onChange={(e) => setIsFree(e.target.checked)}
                   className="rounded"
                 />
-                <Label htmlFor="isFree" className="cursor-pointer">Free preview lesson</Label>
+                <Label htmlFor="isFree" className="cursor-pointer text-sm">Free preview lesson</Label>
               </div>
             </div>
-          </CardContent>
-        </Card>
-
-        {/* ── Step 2: Video upload ── */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <Play className="h-4 w-4" />
-              Video
-            </CardTitle>
-            <CardDescription>
-              Upload a video — it will be transcribed automatically.
-              Or paste a URL if already hosted.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {/* Video preview */}
-            {videoUrl && (
-              <video
-                ref={videoRef}
-                src={videoUrl}
-                controls
-                className="w-full rounded-lg bg-black max-h-72"
-                onLoadedMetadata={(e) => setDuration(Math.round(e.currentTarget.duration))}
-              />
-            )}
-
-            {/* Upload area */}
-            <div
-              onClick={() => inputRef.current?.click()}
-              className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary/50 transition-colors"
-            >
-              <input
-                ref={inputRef}
-                type="file"
-                accept="video/*"
-                className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleVideoFile(f); }}
-              />
-              <Upload className="h-8 w-8 mx-auto text-muted-foreground mb-2" />
-              <p className="text-sm font-medium">Click to upload a video</p>
-              <p className="text-xs text-muted-foreground">MP4, MOV, AVI · up to 4 GB</p>
-            </div>
-
-            {/* Upload progress */}
-            {uploading && (
-              <div className="space-y-1.5">
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>Uploading…</span>
-                  <span>{uploadProgress}%</span>
-                </div>
-                <Progress value={uploadProgress} className="h-1.5" />
-              </div>
-            )}
-
-            {/* Processing indicator */}
-            {processing && (
-              <div className="flex items-center gap-3 bg-muted rounded-lg px-4 py-3 text-sm">
-                <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                {processStep}
-              </div>
-            )}
-
-            {/* Manual video URL */}
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Or enter video URL directly</Label>
-              <Input
-                value={videoUrl}
-                onChange={(e) => setVideoUrl(e.target.value)}
-                placeholder="https://…"
-                className="text-sm"
-              />
-            </div>
-
-            {duration > 0 && (
-              <p className="text-xs text-muted-foreground">
-                Duration: {formatSeconds(duration)}
-              </p>
+            {lesson.videoUrl && (
+              <video src={lesson.videoUrl} controls className="w-full rounded-lg bg-black max-h-72" />
             )}
           </CardContent>
         </Card>
 
-        {/* ── Step 3: Transcript ── */}
+        {/* Transcript */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Transcript
-            </CardTitle>
-            <CardDescription>
-              Shown to students beneath the video. Timestamps have been stripped automatically.
-              Edit freely before saving.
-            </CardDescription>
+            <CardTitle className="text-base">Transcript</CardTitle>
+            <CardDescription>Shown to students beneath the video.</CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             <Textarea
               value={transcript}
               onChange={(e) => setTranscript(e.target.value)}
-              rows={12}
+              rows={10}
               className="font-mono text-sm resize-y"
-              placeholder="Transcript will appear here after upload, or type/paste manually…"
+              dir="auto"
             />
-            <p className="text-xs text-muted-foreground mt-1.5">
-              {transcript.trim().split(/\s+/).filter(Boolean).length} words
-            </p>
           </CardContent>
         </Card>
 
-        {/* ── Step 4: Quiz generation ── */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <HelpCircle className="h-4 w-4" />
-              Quizzes
-            </CardTitle>
-            <CardDescription>
-              Generate MCQ quizzes at all difficulty levels. Students will choose their difficulty
-              before starting. Review and edit every question before saving.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-5">
-            {/* Generation controls */}
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2">
-                <Label className="text-sm shrink-0">Questions per level:</Label>
-                <Input
-                  type="number" min={1} max={20}
-                  value={numQuestions}
-                  onChange={(e) => setNumQuestions(parseInt(e.target.value) || 5)}
-                  className="w-20 text-sm"
-                />
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={generateAll}
-                disabled={anyGenerating || !transcript.trim()}
-              >
-                {anyGenerating ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
-                ) : (
-                  <Sparkles className="h-3.5 w-3.5 mr-1.5" />
-                )}
-                Generate All Levels
-              </Button>
-            </div>
-
-            {/* Per-difficulty tabs */}
-            <Tabs value={activeQuizTab} onValueChange={(v) => setActiveQuizTab(v as Difficulty)}>
-              <TabsList className="grid grid-cols-3">
-                {DIFFICULTIES.map((d) => {
-                  const quiz = quizzes.find((q) => q.difficulty === d)!;
-                  return (
-                    <TabsTrigger key={d} value={d} className="gap-1.5">
-                      <span className="capitalize">{d}</span>
-                      {quiz.generated && (
-                        <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
-                      )}
-                      {quiz.generating && (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      )}
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
-
-              {DIFFICULTIES.map((d) => {
-                const quiz = quizzes.find((q) => q.difficulty === d)!;
-                return (
-                  <TabsContent key={d} value={d} className="space-y-3 mt-4">
-                    {/* Generate button for this level */}
-                    <div className="flex items-center justify-between">
-                      <Badge className={`capitalize ${DIFF_COLORS[d]}`}>{d}</Badge>
-                      <div className="flex gap-2">
-                        {quiz.generated && (
-                          <Button
-                            variant="ghost" size="sm"
-                            onClick={() => generateQuiz(d)}
-                            disabled={quiz.generating}
-                          >
-                            <RefreshCw className="h-3.5 w-3.5 mr-1" />
-                            Regenerate
-                          </Button>
-                        )}
-                        <Button
-                          size="sm"
-                          variant={quiz.generated ? "outline" : "default"}
-                          onClick={() => generateQuiz(d)}
-                          disabled={quiz.generating || !transcript.trim()}
-                        >
-                          {quiz.generating ? (
-                            <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" />
-                          ) : (
-                            <Sparkles className="h-3.5 w-3.5 mr-1" />
-                          )}
-                          {quiz.generated ? "Re-generate" : `Generate ${d} quiz`}
-                        </Button>
-                      </div>
-                    </div>
-
-                    {/* Question list */}
-                    {quiz.questions.length === 0 && !quiz.generating && (
-                      <div className="border border-dashed rounded-lg p-6 text-center text-sm text-muted-foreground">
-                        No questions yet — click Generate to create them with AI,
-                        or click + to add manually.
-                      </div>
-                    )}
-
-                    <div className="space-y-2">
-                      {quiz.questions.map((q, i) => (
-                        <QuestionEditor
-                          key={i}
-                          index={i}
-                          q={q}
-                          onChange={(updated) => updateQuestion(d, i, updated)}
-                          onDelete={() => deleteQuestion(d, i)}
-                        />
-                      ))}
-                    </div>
-
-                    <Button
-                      variant="outline" size="sm"
-                      onClick={() => addQuestion(d)}
-                      className="w-full"
-                    >
-                      <Plus className="h-3.5 w-3.5 mr-1" />
-                      Add Question Manually
-                    </Button>
-                  </TabsContent>
-                );
-              })}
-            </Tabs>
-          </CardContent>
-        </Card>
-
-        {/* ── Save ── */}
-        <div className="flex items-center justify-between pt-2">
-          <p className="text-sm text-muted-foreground">
-            {allGenerated
-              ? "✓ All difficulty levels have questions"
-              : `${quizzes.filter((q) => q.generated).length}/3 difficulty levels generated`}
-          </p>
-          <Button size="lg" onClick={handleSave} disabled={saving}>
-            {saving ? (
-              <Loader2 className="h-4 w-4 animate-spin mr-2" />
-            ) : (
-              <Save className="h-4 w-4 mr-2" />
-            )}
-            Save Lesson & Quizzes
+        <div className="flex justify-end">
+          <Button onClick={handleSaveDetails} disabled={saving}>
+            {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+            Save Details
           </Button>
         </div>
+
+        {/* Quiz editor */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Quiz</CardTitle>
+            <CardDescription>
+              Edit existing questions, add new ones, or remove a difficulty entirely
+              by deleting all its questions and saving.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-3 gap-2">
+              {DIFFICULTIES.map((d) => {
+                const active = activeQuizTab === d;
+                const hasQuiz = lesson.quizzes.some((q) => q.difficulty === d && q.questions.length > 0);
+                return (
+                  <button
+                    key={d}
+                    onClick={() => setActiveQuizTab(d)}
+                    className={`text-sm font-medium rounded-lg py-2 border capitalize transition-colors flex items-center justify-center gap-1.5 ${
+                      active ? DIFF_COLORS[d] : "hover:bg-muted"
+                    }`}
+                  >
+                    {d}
+                    {hasQuiz && <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            {DIFFICULTIES.filter((d) => d === activeQuizTab).map((d) => (
+              <div key={d} className="space-y-3">
+                {quizzes[d].length === 0 && (
+                  <div className="border border-dashed rounded-lg p-6 text-center text-sm text-muted-foreground">
+                    No questions yet for {d} — add some below.
+                  </div>
+                )}
+
+                {quizzes[d].map((q, i) => (
+                  <QuestionEditor
+                    key={i}
+                    index={i}
+                    q={q}
+                    onChange={(updated) => updateQuestion(d, i, updated)}
+                    onDelete={() => deleteQuestion(d, i)}
+                  />
+                ))}
+
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => addQuestion(d)}>
+                    <Plus className="h-3.5 w-3.5 mr-1" />
+                    Add Question
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => handleSaveQuiz(d)}
+                    disabled={savingQuiz[d]}
+                  >
+                    {savingQuiz[d] ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+                    Save {d} Quiz
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+
+        {/* Materials */}
+        <MaterialsManager
+          courseId={courseId!}
+          sectionId={sectionId!}
+          lessonId={lessonId!}
+          materials={lesson.materials}
+          onChanged={fetchLesson}
+        />
       </div>
     </DashboardLayout>
   );

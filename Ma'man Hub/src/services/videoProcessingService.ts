@@ -1,6 +1,14 @@
-import api from "./api.ts";
+import api from "./api";
+import { QuizQuestionDraft } from "./courseService";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
+
+export type DraftQuizQuestion = QuizQuestionDraft;
+
+export interface DraftQuizSet {
+  difficulty: "easy" | "medium" | "hard";
+  questions: DraftQuizQuestion[];
+}
 
 export interface VideoChunk {
   id: string;
@@ -10,13 +18,11 @@ export interface VideoChunk {
   transcript: string;
   startTime: string;
   endTime: string;
-  sectionId?: string;
-  lessonTitle?: string;
   isSaved: boolean;
-  lessonId?: string;
+  lessonId?: string | null;
+  draftQuizzes: DraftQuizSet[];
 }
 
-/** Course-level metadata returned by the AI pipeline's "description" object. */
 export interface PipelineDescription {
   summary: string;
   targetAudience: string;
@@ -27,92 +33,181 @@ export interface PipelineDescription {
 export interface VideoProcessingJob {
   id: string;
   courseId: string;
-  sourceType: string;
+  sectionId: string;
+  sourceType: "upload" | "youtube";
+  mode: "chunked" | "single";
   sourceUrl: string;
-  status: "pending" | "processing" | "awaiting_review" | "completed" | "failed";
-  errorMessage?: string;
-  rawTranscript?: string;
-  /** Null when the pipeline did not return a description object. */
+  videoUrl?: string | null;
+  status:
+    | "pending"
+    | "processing"
+    | "awaiting_correction"
+    | "awaiting_review"
+    | "awaiting_quiz"
+    | "completed"
+    | "failed"
+    | "expired";
+  errorMessage?: string | null;
+  rawTranscript?: string | null;
+  correctedTranscript?: string | null;
+  accuracyScore?: number | null;
+  detectedLanguage?: string | null;
+  isTranscriptApproved: boolean;
   description?: PipelineDescription | null;
   chunks: VideoChunk[];
+}
+
+export interface BoundaryAlignment {
+  isAligned: boolean;
+  nearestLineBefore?: string | null;
+  nearestLineAfter?: string | null;
+}
+
+export interface UpdateChunkResult {
+  transcript: string;
+  needsTranscriptReview: boolean;
+  startAlignment?: BoundaryAlignment | null;
+  endAlignment?: BoundaryAlignment | null;
+}
+
+export interface CorrectTranscriptResult {
+  correctedTranscript: string;
+  accuracy: number;
+  detectedLanguage: string;
+  errors: string[];
+  needsRevision: boolean;
 }
 
 // ── Service ───────────────────────────────────────────────────────────────────
 
 export const videoProcessingService = {
-  /** Submit a YouTube URL for processing. Returns the jobId. */
-  processYoutube: async (courseId: string, youtubeUrl: string): Promise<string> => {
-    const res = await api.post("/videoprocessing/youtube", { courseId, youtubeUrl });
+  // ── Starting a job (the 4 entry points) ───────────────────────────────────
+
+  startChunkedFromYoutube: async (
+    courseId: string,
+    sectionId: string,
+    youtubeUrl: string
+  ): Promise<string> => {
+    const res = await api.post("/videoprocessing/chunked/youtube", {
+      courseId,
+      sectionId,
+      youtubeUrl,
+    });
     return res.data.data.jobId as string;
   },
 
-  /** Upload a video file for processing. Returns the jobId. */
-  processUpload: async (
+  startChunkedFromUpload: async (
     courseId: string,
+    sectionId: string,
     file: File,
     onProgress?: (pct: number) => void
   ): Promise<string> => {
     const form = new FormData();
     form.append("courseId", courseId);
+    form.append("sectionId", sectionId);
     form.append("file", file);
-
-    // Do NOT set Content-Type manually — the browser must generate the boundary.
-    const res = await api.post("/videoprocessing/upload", form, {
+    const res = await api.post("/videoprocessing/chunked/upload", form, {
       onUploadProgress: (e) => {
-        if (onProgress && e.total) {
-          onProgress(Math.round((e.loaded / e.total) * 100));
-        }
+        if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
       },
     });
     return res.data.data.jobId as string;
   },
 
-  /** Get a job by ID (status + chunks + description). */
+  startSingleFromYoutube: async (
+    courseId: string,
+    sectionId: string,
+    youtubeUrl: string
+  ): Promise<string> => {
+    const res = await api.post("/videoprocessing/single/youtube", {
+      courseId,
+      sectionId,
+      youtubeUrl,
+    });
+    return res.data.data.jobId as string;
+  },
+
+  startSingleFromUpload: async (
+    courseId: string,
+    sectionId: string,
+    file: File,
+    onProgress?: (pct: number) => void
+  ): Promise<string> => {
+    const form = new FormData();
+    form.append("courseId", courseId);
+    form.append("sectionId", sectionId);
+    form.append("file", file);
+    const res = await api.post("/videoprocessing/single/upload", form, {
+      onUploadProgress: (e) => {
+        if (onProgress && e.total) onProgress(Math.round((e.loaded / e.total) * 100));
+      },
+    });
+    return res.data.data.jobId as string;
+  },
+
+  // ── Job retrieval ──────────────────────────────────────────────────────────
+
   getJob: async (jobId: string): Promise<VideoProcessingJob> => {
     const res = await api.get(`/videoprocessing/${jobId}`);
     return res.data.data as VideoProcessingJob;
   },
 
-  /** Auto-save edits to a chunk's title and transcript. */
+  // ── Transcript correction (runs once, pre-chunking) ─────────────────────────
+
+  checkAccuracy: async (jobId: string): Promise<CorrectTranscriptResult> => {
+    const res = await api.post(`/videoprocessing/${jobId}/correct-transcript`);
+    return res.data.data as CorrectTranscriptResult;
+  },
+
+  approveTranscript: async (jobId: string, choice: "corrected" | "original"): Promise<void> => {
+    await api.post(`/videoprocessing/${jobId}/approve-transcript`, { choice });
+  },
+
+  updateRawTranscript: async (jobId: string, transcript: string): Promise<void> => {
+    await api.patch(`/videoprocessing/${jobId}/transcript`, { transcript });
+  },
+
+  // ── Chunk boundary / content editing ────────────────────────────────────────
+
   updateChunk: async (
     jobId: string,
     chunkId: string,
-    title: string,
-    transcript: string
-  ): Promise<void> => {
-    await api.patch(`/videoprocessing/${jobId}/chunks/${chunkId}`, { title, transcript });
+    changes: { title?: string; transcript?: string; startTime?: string; endTime?: string }
+  ): Promise<UpdateChunkResult> => {
+    const res = await api.patch(`/videoprocessing/${jobId}/chunks/${chunkId}`, changes);
+    return res.data.data as UpdateChunkResult;
   },
 
-  /** Save a reviewed chunk as a lesson inside a section. */
-  saveChunk: async (
+  // ── Per-chunk quiz generation + editing ──────────────────────────────────────
+
+  generateChunkQuiz: async (
     jobId: string,
     chunkId: string,
-    payload: {
-      courseId: string;
-      sectionId: string;
-      title: string;
-      transcript: string;
-      order: number;
-    }
+    numQuestions = 5
+  ): Promise<DraftQuizSet[]> => {
+    const res = await api.post(`/videoprocessing/${jobId}/chunks/${chunkId}/generate-quiz`, {
+      numQuestions,
+    });
+    return res.data.data as DraftQuizSet[];
+  },
+
+  updateChunkQuizQuestions: async (
+    jobId: string,
+    chunkId: string,
+    difficulty: string,
+    questions: DraftQuizQuestion[]
+  ): Promise<void> => {
+    await api.put(`/videoprocessing/${jobId}/chunks/${chunkId}/quiz/${difficulty}`, questions);
+  },
+
+  // ── Final save: chunk → real Lesson ──────────────────────────────────────────
+
+  saveChunkAsLesson: async (
+    jobId: string,
+    chunkId: string,
+    payload: { title: string; transcript: string; order: number; isFree: boolean }
   ): Promise<string> => {
-    const res = await api.post(
-      `/videoprocessing/${jobId}/chunks/${chunkId}/save`,
-      payload
-    );
+    const res = await api.post(`/videoprocessing/${jobId}/chunks/${chunkId}/save`, payload);
     return res.data.data.lessonId as string;
   },
-};
-
-/** Create a new section directly on a course (used during video review). */
-export const createSection = async (
-  courseId: string,
-  title: string,
-  description?: string
-): Promise<void> => {
-  await api.post("/coursecreator/sections", {
-    courseId,
-    title,
-    description: description ?? "",
-    order: 0, // backend can auto-assign based on existing count
-  });
 };

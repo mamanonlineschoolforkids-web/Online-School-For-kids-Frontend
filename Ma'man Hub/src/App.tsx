@@ -48,14 +48,14 @@ import CreatorDashboardPage from "./pages/creator/CreatorDashboardPage";
 import CreatorProfilePage from "./pages/creator/CreatorProfilePage";
 import GoLivePage from "./pages/creator/GoLivePage";
 import LiveSessionPage from "./pages/creator/LiveSessionPage";
-import UploadVideoPage from "./pages/creator/UploadVideoPage";
 import CreatorMyCoursesPage from "@/pages/creator/MyCoursesPage";
 import CourseDetailManagementPage from "@/pages/creator/CourseDetailManagementPage";
 import CreateCoursePage from "@/pages/creator/CreateCoursePage";
 
-// ── NEW creator pages ──────────────────────────────────────────────────────────
+// ── Lesson creation & editing ────────────────────────────────────────────────
 import LessonEditorPage from "@/pages/creator/LessonEditorPage";
-import VideoChunkEditorPage from "@/pages/creator/VideoChunkEditorPage";
+import ChunkReviewPage from "@/pages/creator/ChunkReviewPage";
+import SingleLessonReviewPage from "@/pages/creator/SingleLessonReviewPage";
 import CoursePreviewPage from "@/pages/creator/CoursePreviewPage";
 
 // Messages Pages
@@ -130,17 +130,10 @@ const App = () => (
           <Route path="/course/:courseId/learn"    element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<CoursePlayerPage />} />} />
           <Route path="/course/:courseId/progress" element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<CourseProgressPage />} />} />
 
-          {/*
-            Quiz page — now includes difficulty selection.
-            Route: /course/:courseId/lesson/:lessonId/quiz
-            QuizPage reads the lessonId, fetches quizzes for all difficulties,
-            shows a difficulty picker, then runs the quiz.
-          */}
           <Route
             path="/course/:courseId/lesson/:lessonId/quiz"
             element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<QuizPage />} />}
           />
-          {/* Keep old route for backward compat */}
           <Route
             path="/course/:courseId/quiz/:quizId"
             element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<QuizPage />} />}
@@ -153,30 +146,30 @@ const App = () => (
           <Route path="/ContentCreator/profile"   element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<CreatorProfilePage />} />} />
           <Route path="/ContentCreator/go-live"   element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<GoLivePage />} />} />
           <Route path="/live/:sessionId"           element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<LiveSessionPage />} />} />
-          <Route path="/ContentCreator/upload"    element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<UploadVideoPage />} />} />
 
           <Route path="/creator/my-courses"   element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<CreatorMyCoursesPage />} />} />
           <Route path="/creator/courses/new"  element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<CreateCoursePage />} />} />
 
-          {/* Course management — overview + curriculum + settings */}
           <Route
             path="/creator/courses/:courseId"
             element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<CourseDetailManagementPage />} />}
           />
 
-          {/* ── NEW: Lesson editor (single video → one lesson) ── */}
           <Route
             path="/creator/courses/:courseId/sections/:sectionId/lessons/:lessonId"
             element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<LessonEditorPage />} />}
           />
 
-          {/* ── NEW: Video chunk editor (long video → multiple lessons) ── */}
           <Route
-            path="/creator/courses/:courseId/chunk-editor"
-            element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<VideoChunkEditorPage />} />}
+            path="/creator/courses/:courseId/chunk-review/:jobId"
+            element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<ChunkReviewPage />} />}
           />
 
-          {/* ── NEW: Course preview + publish ── */}
+          <Route
+            path="/creator/courses/:courseId/single-lesson-review/:jobId"
+            element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<SingleLessonReviewPage />} />}
+          />
+
           <Route
             path="/creator/courses/:courseId/preview"
             element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<CoursePreviewPage />} />}

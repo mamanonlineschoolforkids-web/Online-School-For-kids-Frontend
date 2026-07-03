@@ -150,12 +150,13 @@ function CreatorView({ course, onPublish, publishing }: {
                           </div>
                         </div>
 
-                        {/* Quiz breakdown */}
+                        {/* Quiz breakdown — keyed by difficulty since the DTO
+                            doesn't carry a stable per-quiz-set id */}
                         {lesson.quizzes && lesson.quizzes.length > 0 && (
                           <div className="ml-6 flex flex-wrap gap-1.5">
                             {lesson.quizzes.map((quiz) => (
                               <span
-                                key={quiz.id}
+                                key={quiz.difficulty}
                                 className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${DIFF_COLORS[quiz.difficulty] ?? "bg-muted text-muted-foreground"}`}
                               >
                                 <HelpCircle className="h-3 w-3" />
@@ -361,7 +362,6 @@ export default function CoursePreviewPage() {
     <DashboardLayout>
       <div className="mx-auto max-w-4xl space-y-6 pb-12">
 
-        {/* Header */}
         <div className="flex items-center gap-3">
           <Button variant="ghost" size="sm" onClick={() => navigate(`/creator/courses/${courseId}`)}>
             <ArrowLeft className="h-4 w-4 mr-1" />
@@ -382,7 +382,6 @@ export default function CoursePreviewPage() {
             </div>
           </div>
 
-          {/* View toggle */}
           <div className="flex border rounded-lg overflow-hidden shrink-0">
             <button
               onClick={() => setViewMode("creator")}
@@ -405,7 +404,6 @@ export default function CoursePreviewPage() {
           </div>
         </div>
 
-        {/* Student preview banner */}
         {viewMode === "student" && (
           <div className="flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
             <Eye className="h-4 w-4 shrink-0" />
@@ -413,7 +411,6 @@ export default function CoursePreviewPage() {
           </div>
         )}
 
-        {/* Content */}
         {viewMode === "creator" ? (
           <CreatorView course={course} onPublish={handlePublish} publishing={publishing} />
         ) : (
