@@ -640,36 +640,45 @@ export default function ChunkReviewPage() {
 
   // ── Save chunk as lesson ─────────────────────────────────────────────────────
 
-  const handleSaveChunk = async (chunk: VideoChunk) => {
-    if (!jobId) return;
-    const hasAnyQuestions = chunk.draftQuizzes.some((q) => q.questions.length > 0);
-    if (!hasAnyQuestions) {
-      toast({ title: "Generate a quiz for this chunk first", variant: "destructive" });
-      return;
-    }
-    if (job && !job.isTranscriptApproved) {
-      const proceed = window.confirm(
-        "You haven't approved the transcript yet. Save this lesson anyway?"
-      );
-      if (!proceed) return;
-    }
 
-    setSavingChunk((p) => ({ ...p, [chunk.id]: true }));
-    try {
-      await videoProcessingService.saveChunkAsLesson(jobId, chunk.id, {
-        title: chunk.title,
-        transcript: chunk.transcript,
-        order: chunkOrders[chunk.id] ?? 1,
-        isFree: chunkFree[chunk.id] ?? false,
-      });
-      toast({ title: "Lesson created ✓" });
-      fetchJob();
-    } catch (err: any) {
-      toast({ title: "Failed to save", description: err?.response?.data?.message, variant: "destructive" });
-    } finally {
-      setSavingChunk((p) => ({ ...p, [chunk.id]: false }));
-    }
-  };
+const handleSaveChunk = async (chunk: VideoChunk) => {
+  if (!jobId) return;
+  const hasAnyQuestions = chunk.draftQuizzes.some((q) => q.questions.length > 0);
+  if (!hasAnyQuestions) {
+    toast({ title: "Generate a quiz for this chunk first", variant: "destructive" });
+    return;
+  }
+  if (job && !job.isTranscriptApproved) {
+    const proceed = window.confirm(
+      "You haven't approved the transcript yet. Save this lesson anyway?"
+    );
+    if (!proceed) return;
+  }
+ 
+  // Lesson duration = this chunk's own span, not the whole video's length.
+  const startSec = parseTime(chunk.startTime);
+  const endSec = parseTime(chunk.endTime) || duration; // fall back to full video length if uncut
+  const chunkDuration = Math.max(0, endSec - startSec);
+ 
+  setSavingChunk((p) => ({ ...p, [chunk.id]: true }));
+  try {
+    await videoProcessingService.saveChunkAsLesson(jobId, chunk.id, {
+      title: chunk.title,
+      transcript: chunk.transcript,
+      order: chunkOrders[chunk.id] ?? 1,
+      isFree: chunkFree[chunk.id] ?? false,
+      duration: chunkDuration,
+      startTime: chunk.startTime,
+      endTime: chunk.endTime || formatTime(duration),
+    });
+    toast({ title: "Lesson created ✓" });
+    fetchJob();
+  } catch (err: any) {
+    toast({ title: "Failed to save", description: err?.response?.data?.message, variant: "destructive" });
+  } finally {
+    setSavingChunk((p) => ({ ...p, [chunk.id]: false }));
+  }
+};
 
   // ── Derived ──────────────────────────────────────────────────────────────────
 

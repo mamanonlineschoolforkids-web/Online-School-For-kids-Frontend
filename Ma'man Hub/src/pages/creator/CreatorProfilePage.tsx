@@ -19,6 +19,7 @@ import { useToast } from "@/hooks/use-toast";
 import { Link } from "react-router-dom";
 import { ShareProfileDialog } from "@/components/profile/ShareProfileDialog";
 import { userService, ProfileDto } from "@/services/userService";
+import { useAuthStore } from "@/stores/authStore";
 import { NotificationsTab } from "@/components/profile/NotificationsTab";
 import { ExperienceTab } from "@/components/profile/creator/ExperienceTab";
 import { SocialLinksTab } from "@/components/profile/creator/SocialLinksTab";
@@ -38,6 +39,7 @@ interface CreatorStats {
 
 export default function CreatorProfilePage() {
   const { toast } = useToast();
+  const { user: currentUser, setUser } = useAuthStore();
   const [userData, setUserData] = useState<ProfileDto | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -91,7 +93,7 @@ export default function CreatorProfilePage() {
       const formData = new FormData(); formData.append("profilePicture", file);
       const response = await userService.uploadProfilePicture(formData);
       setUserData(prev => prev ? { ...prev, profilePictureUrl: response.profilePictureUrl } : null);
-      const user = JSON.parse(localStorage.getItem("user") || "{}"); user.profilePictureUrl = response.profilePictureUrl; localStorage.setItem("user", JSON.stringify(user));
+      if (currentUser) setUser({ ...currentUser, profilePictureUrl: response.profilePictureUrl });
       toast({ title: "Success", description: "Profile picture updated successfully" });
     } catch (error: any) {
       toast({ title: "Error", description: error.response?.data?.message || "Failed to upload profile picture", variant: "destructive" });
@@ -110,7 +112,7 @@ export default function CreatorProfilePage() {
       };
       const updatedProfile = await userService.updateProfile(updateData);
       setUserData(prev => prev ? { ...prev, ...updateData } : null);
-      const user = JSON.parse(localStorage.getItem("user") || "{}"); user.fullName = updatedProfile.fullName; localStorage.setItem("user", JSON.stringify(user));
+      if (currentUser) setUser({ ...currentUser, fullName: updatedProfile.fullName });
       setIsEditingProfile(false);
       toast({ title: "Profile Updated", description: "Your profile has been saved successfully." });
     } catch (error: any) {

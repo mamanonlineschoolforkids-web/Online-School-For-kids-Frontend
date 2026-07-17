@@ -18,6 +18,49 @@ export interface Child {
   status: ChildStatus
 }
 
+export interface ChildProfilePreview {
+  id: string;
+  fullName: string;
+  email: string;
+  age: number;
+  profilePictureUrl?: string | null;
+  isAlreadyLinked: boolean;
+  currentParentId?: string | null;
+}
+
+export interface ChildOverview {
+  id: string;
+  name: string;
+  age: number;
+  avatarUrl?: string;
+  coursesEnrolled: number;
+  hoursThisWeek: number;
+  overallProgress: number;
+  streak: number;
+  recentActivity?: string;
+}
+
+export interface ChildAchievement {
+  childName: string;
+  title: string;
+  description: string;
+  icon: string;
+}
+
+export interface ChildActivity {
+  childName: string;
+  description: string;
+  date: string;
+}
+
+export interface ParentDashboardStats {
+  children: ChildOverview[];
+  /** Recharts-ready rows: {day: "Mon", [childId]: hours, ...} */
+  weeklyHoursChartData: Record<string, string | number>[];
+  recentAchievements: ChildAchievement[];
+  recentActivity: ChildActivity[];
+}
+
  export const parentService = {
 
  getLinkedChildren: async (): Promise<Child[]> => {
@@ -26,25 +69,16 @@ export interface Child {
   },
 
 
-  addChild: async (childData: { 
-    name: string; 
-    age: number; 
-    email?: string 
-  }): Promise<Child> => {
-    const response = await api.post('/Parent/children', childData);
-    return response.data;
-  },
-
   removeChild: async (childId: string): Promise<void> => {
     await api.delete(`/Parent/children/${childId}`);
   },
 
-  searchChildByEmail: async (email: string): Promise<{ 
-    exists: boolean; 
-    child?: any;
+  searchChildByEmail: async (email: string): Promise<{
+    exists: boolean;
+    child?: ChildProfilePreview;
   }> => {
-    const response = await api.get(`/Parent/search-child`, { 
-      params: { email } 
+    const response = await api.get(`/Parent/search-child`, {
+      params: { email }
     });
     return response.data;
   },
@@ -60,13 +94,18 @@ export interface Child {
     confirmPassword: string;
     dateOfBirth: string;
     country: string;
-  }): Promise<any> => {
+  }): Promise<Child> => {
     const response = await api.post('/Parent/create-child', childData);
     return response.data;
   },
 
   getChildProgress: async (childId: string): Promise<any> => {
     const response = await api.get(`/Parent/children/${childId}/progress`);
+    return response.data;
+  },
+
+  getDashboardStats: async (): Promise<ParentDashboardStats> => {
+    const response = await api.get('/Parent/dashboard-stats');
     return response.data;
   },
 

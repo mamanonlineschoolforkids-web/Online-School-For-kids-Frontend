@@ -1,505 +1,542 @@
-import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
-import confetti from "canvas-confetti";
+import { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Clock, CheckCircle, XCircle, ArrowRight, ArrowLeft,
-  Trophy, RotateCcw, Home, Loader2, AlertCircle,
-  Zap, Shield, Flame,
+  ArrowLeft, CheckCircle2, XCircle, Clock, Trophy,
+  Loader2, AlertCircle, ChevronRight, RotateCcw,
+  HelpCircle, Star, History, Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { MainLayout } from "@/components/layout/MainLayout";
-import api from "@/services/api";
+import { Card, CardContent } from "@/components/ui/card";
+import { useToast } from "@/hooks/use-toast";
+import { studentService, QuizAttemptDto , LessonQuizFull } from "@/services/studentService";
+import { useQueryClient } from "@tanstack/react-query";
+import { leaderboardKeys } from "@/services/useleaderboard";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type Difficulty = "easy" | "medium" | "hard";
-
 interface QuizQuestion {
-  id: string;
-  question: string;
-  options: string[];
+  text: string;
+  options: { id: string; text: string; isCorrect: boolean; order: number }[];
   correctAnswer: number;
-  explanation: string;
+  explanation?: string;
 }
 
 interface LessonQuiz {
   id: string;
-  difficulty: Difficulty;
+  difficulty: "easy" | "medium" | "hard";
   questions: QuizQuestion[];
 }
 
-// ── Difficulty meta ───────────────────────────────────────────────────────────
+type QuizPhase = "pick-difficulty" | "quiz" | "result" | "history";
 
-const DIFF_META: Record<Difficulty, {
-  label: string;
-  description: string;
-  color: string;
-  bg: string;
-  icon: React.ReactNode;
-  timePerQ: number;   // seconds per question
-  passingScore: number;
-}> = {
-  easy: {
-    label:        "Easy",
-    description:  "Basic recall and understanding. Great for a first attempt.",
-    color:        "text-green-700",
-    bg:           "bg-green-50 border-green-200 hover:border-green-400",
-    icon:         <Zap className="h-6 w-6 text-green-600" />,
-    timePerQ:     30,
-    passingScore: 60,
-  },
-  medium: {
-    label:        "Medium",
-    description:  "Application and analysis. Tests deeper understanding.",
-    color:        "text-amber-700",
-    bg:           "bg-amber-50 border-amber-200 hover:border-amber-400",
-    icon:         <Shield className="h-6 w-6 text-amber-600" />,
-    timePerQ:     45,
-    passingScore: 70,
-  },
-  hard: {
-    label:        "Hard",
-    description:  "Synthesis and evaluation. For mastery of the material.",
-    color:        "text-red-700",
-    bg:           "bg-red-50 border-red-200 hover:border-red-400",
-    icon:         <Flame className="h-6 w-6 text-red-600" />,
-    timePerQ:     60,
-    passingScore: 80,
-  },
+const DIFF_COLORS: Record<string, string> = {
+  easy: "bg-green-100 text-green-700 border-green-200 hover:bg-green-200",
+  medium: "bg-amber-100 text-amber-700 border-amber-200 hover:bg-amber-200",
+  hard: "bg-red-100 text-red-700 border-red-200 hover:bg-red-200",
 };
 
-// ── Difficulty picker ─────────────────────────────────────────────────────────
+const PASS_THRESHOLD = 60;
 
-function DifficultyPicker({
-  quizzes,
-  lessonTitle,
-  onSelect,
-}: {
-  quizzes: LessonQuiz[];
-  lessonTitle: string;
-  onSelect: (d: Difficulty) => void;
-}) {
-  const available = quizzes.map((q) => q.difficulty);
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
-  return (
-    <div className="container max-w-2xl py-12">
-      <motion.div initial={{ opacity: 0, y: -16 }} animate={{ opacity: 1, y: 0 }}>
-        <p className="text-sm text-muted-foreground mb-1">{lessonTitle}</p>
-        <h1 className="text-3xl font-bold mb-2">Choose Your Difficulty</h1>
-        <p className="text-muted-foreground mb-8">
-          All difficulty levels test the same lesson content but ask questions
-          at different depths. You can retake at any level.
-        </p>
-
-        <div className="space-y-3">
-          {(["easy", "medium", "hard"] as Difficulty[]).map((d) => {
-            const meta      = DIFF_META[d];
-            const quiz      = quizzes.find((q) => q.difficulty === d);
-            const available = !!quiz;
-
-            return (
-              <button
-                key={d}
-                disabled={!available}
-                onClick={() => onSelect(d)}
-                className={`w-full flex items-center gap-4 border-2 rounded-xl p-5 text-left transition-all ${
-                  available
-                    ? `${meta.bg} cursor-pointer`
-                    : "opacity-40 cursor-not-allowed bg-muted border-muted"
-                }`}
-              >
-                <div className="shrink-0">{meta.icon}</div>
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-0.5">
-                    <span className={`font-bold ${meta.color}`}>{meta.label}</span>
-                    {available && (
-                      <Badge variant="secondary" className="text-xs">
-                        {quiz!.questions.length} questions ·{" "}
-                        {Math.round((quiz!.questions.length * meta.timePerQ) / 60)} min
-                      </Badge>
-                    )}
-                    {!available && (
-                      <Badge variant="secondary" className="text-xs bg-muted">Not available</Badge>
-                    )}
-                  </div>
-                  <p className="text-sm text-muted-foreground">{meta.description}</p>
-                </div>
-                <ArrowRight className={`h-5 w-5 shrink-0 ${meta.color}`} />
-              </button>
-            );
-          })}
-        </div>
-      </motion.div>
-    </div>
-  );
+function formatTime(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
-// ── Quiz runner ───────────────────────────────────────────────────────────────
+// ── Main Page ─────────────────────────────────────────────────────────────────
 
-function QuizRunner({
-  quiz,
-  lessonTitle,
-  courseId,
-  lessonId,
-  onRetry,
-}: {
-  quiz: LessonQuiz;
-  lessonTitle: string;
-  courseId: string;
-  lessonId: string;
-  onRetry: () => void;
-}) {
+export default function QuizPage() {
+  const { courseId, lessonId } = useParams<{ courseId: string; lessonId: string }>();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const meta     = DIFF_META[quiz.difficulty];
-  const timeLimit = quiz.questions.length * meta.timePerQ;
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  const [currentQ, setCurrentQ]     = useState(0);
-  const [answers, setAnswers]       = useState<Record<string, number>>({});
-  const [timeLeft, setTimeLeft]     = useState(timeLimit);
-  const [submitted, setSubmitted]   = useState(false);
+  const difficultyParam = searchParams.get("difficulty") as "easy" | "medium" | "hard" | null;
 
-  // Timer
+  const [quizzes, setQuizzes] = useState<LessonQuiz[]>([]);
+  const [pastAttempts, setPastAttempts] = useState<QuizAttemptDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Quiz session state
+  const [phase, setPhase] = useState<QuizPhase>("pick-difficulty");
+  const [selectedDifficulty, setSelectedDifficulty] = useState<string | null>(null);
+  const [currentQuiz, setCurrentQuiz] = useState<LessonQuiz | null>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [selectedAnswer, setSelectedAnswer] = useState<number | null>(null);
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [answers, setAnswers] = useState<{ questionIndex: number; selectedAnswer: number; isCorrect: boolean }[]>([]);
+  const [timeLeft, setTimeLeft] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [attemptResult, setAttemptResult] = useState<{
+    score: number; correctAnswers: number; totalQuestions: number; passed: boolean;
+    pointsEarned: number; totalPoints: number;
+  } | null>(null);
+
+  const timerRef = useRef<ReturnType<typeof setInterval>>();
+
+  // ── Load lesson quizzes ────────────────────────────────────────────────────
+
+
+useEffect(() => {
+  if (!courseId || !lessonId) return;
+  Promise.all([
+    studentService.getLessonQuiz(courseId, lessonId),
+    studentService.getLessonQuizAttempts(lessonId),
+  ])
+    .then(([quizContent, attempts]) => {
+      if (!quizContent || quizContent.length === 0) {
+        setQuizzes([]);
+        setPastAttempts(attempts);
+        setPhase("pick-difficulty");
+        return;
+      }
+ 
+      const mapped: LessonQuiz[] = quizContent.map((q) => ({
+        id: q.difficulty,
+        difficulty: q.difficulty as "easy" | "medium" | "hard",
+        questions: q.questions.map((qq) => ({
+          text: qq.text,
+          options: qq.options.map((o) => ({
+            id: o.id,
+            text: o.text,
+            isCorrect: o.order === qq.correctAnswer, // derived; not sent by API
+            order: o.order,
+          })),
+          correctAnswer: qq.correctAnswer,
+          explanation: qq.explanation,
+        })),
+      }));
+ 
+      setQuizzes(mapped);
+      setPastAttempts(attempts);
+ 
+      // Auto-start if difficulty was passed via query param
+      if (difficultyParam) {
+        const quiz = mapped.find((q) => q.difficulty === difficultyParam);
+        if (quiz) {
+          startQuiz(quiz);
+          return;
+        }
+      }
+      setPhase("pick-difficulty");
+    })
+    .catch(() => setError("Could not load quiz."))
+    .finally(() => setLoading(false));
+}, [courseId, lessonId, difficultyParam]);
+ 
+  // ── Timer ──────────────────────────────────────────────────────────────────
+
   useEffect(() => {
-    if (submitted) return;
-    const t = setInterval(() => {
+    if (phase !== "quiz" || !currentQuiz) return;
+    clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
       setTimeLeft((prev) => {
-        if (prev <= 1) { handleSubmit(); return 0; }
+        if (prev <= 1) {
+          clearInterval(timerRef.current);
+          handleTimeUp();
+          return 0;
+        }
         return prev - 1;
       });
     }, 1000);
-    return () => clearInterval(t);
-  }, [submitted]);
+    return () => clearInterval(timerRef.current);
+  }, [phase, currentIndex]);
 
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m}:${sec.toString().padStart(2, "0")}`;
+  const startQuiz = (quiz: LessonQuiz) => {
+    setCurrentQuiz(quiz);
+    setSelectedDifficulty(quiz.difficulty);
+    setCurrentIndex(0);
+    setAnswers([]);
+    setSelectedAnswer(null);
+    setShowFeedback(false);
+    setAttemptResult(null);
+    setTimeLeft(quiz.difficulty === "easy" ? 30 : quiz.difficulty === "medium" ? 45 : 60);
+    setPhase("quiz");
   };
 
-  const handleAnswer = (qId: string, idx: number) =>
-    setAnswers((p) => ({ ...p, [qId]: idx }));
+  const handleTimeUp = () => {
+    if (!currentQuiz) return;
+    const q = currentQuiz.questions[currentIndex];
+    const recorded = {
+      questionIndex: currentIndex,
+      selectedAnswer: -1,
+      isCorrect: false,
+    };
+    const newAnswers = [...answers, recorded];
 
-  const calculateScore = () => {
-    let correct = 0;
-    quiz.questions.forEach((q) => { if (answers[q.id] === q.correctAnswer) correct++; });
-    return Math.round((correct / quiz.questions.length) * 100);
-  };
-
-  const handleSubmit = () => {
-    setSubmitted(true);
-    const score = calculateScore();
-    if (score >= meta.passingScore) {
-      confetti({ particleCount: 120, spread: 70, origin: { y: 0.6 } });
+    if (currentIndex < currentQuiz.questions.length - 1) {
+      setAnswers(newAnswers);
+      setCurrentIndex((i) => i + 1);
+      setSelectedAnswer(null);
+      setShowFeedback(false);
+      const newDiff = currentQuiz.difficulty;
+      setTimeLeft(newDiff === "easy" ? 30 : newDiff === "medium" ? 45 : 60);
+    } else {
+      finishQuiz(newAnswers);
     }
   };
 
-  const question    = quiz.questions[currentQ];
-  const progress    = ((currentQ + 1) / quiz.questions.length) * 100;
-  const answered    = Object.keys(answers).length;
+  const handleSelectAnswer = (idx: number) => {
+    if (showFeedback || selectedAnswer !== null) return;
+    setSelectedAnswer(idx);
+    setShowFeedback(true);
+    clearInterval(timerRef.current);
 
-  // ── Results screen ───────────────────────────────────────────────────────
-  if (submitted) {
-    const score   = calculateScore();
-    const passed  = score >= meta.passingScore;
-    const correct = quiz.questions.filter((q) => answers[q.id] === q.correctAnswer).length;
+    if (!currentQuiz) return;
+    const q = currentQuiz.questions[currentIndex];
+    const correct = idx === q.correctAnswer;
+    const recorded = { questionIndex: currentIndex, selectedAnswer: idx, isCorrect: correct };
+    const newAnswers = [...answers, recorded];
+
+    setTimeout(() => {
+      if (currentIndex < currentQuiz.questions.length - 1) {
+        setAnswers(newAnswers);
+        setCurrentIndex((i) => i + 1);
+        setSelectedAnswer(null);
+        setShowFeedback(false);
+        const newDiff = currentQuiz.difficulty;
+        setTimeLeft(newDiff === "easy" ? 30 : newDiff === "medium" ? 45 : 60);
+      } else {
+        setAnswers(newAnswers);
+        finishQuiz(newAnswers);
+      }
+    }, 1200);
+  };
+
+  const finishQuiz = async (finalAnswers: typeof answers) => {
+    if (!currentQuiz || !courseId || !lessonId) return;
+    clearInterval(timerRef.current);
+    setSaving(true);
+    try {
+      const result = await studentService.saveQuizAttempt({
+        courseId,
+        lessonId,
+        difficulty: currentQuiz.difficulty,
+        answers: finalAnswers,
+      });
+      setAttemptResult(result);
+      const updated = await studentService.getLessonQuizAttempts(lessonId);
+      setPastAttempts(updated);
+      if (result.pointsEarned > 0) {
+        queryClient.invalidateQueries({ queryKey: leaderboardKeys.all });
+      }
+    } catch {
+      toast({ title: "Could not save attempt", variant: "destructive" });
+      const correct = finalAnswers.filter((a) => a.isCorrect).length;
+      const total = finalAnswers.length;
+      setAttemptResult({
+        score: total > 0 ? Math.round((correct / total) * 100) : 0,
+        correctAnswers: correct,
+        totalQuestions: total,
+        passed: total > 0 && correct / total >= PASS_THRESHOLD / 100,
+        pointsEarned: 0,
+        totalPoints: 0,
+      });
+    } finally {
+      setSaving(false);
+      setPhase("result");
+    }
+  };
+
+  // ── Guards ─────────────────────────────────────────────────────────────────
+
+  if (loading) return (
+    <div className="flex items-center justify-center min-h-screen gap-3 text-muted-foreground">
+      <Loader2 className="h-6 w-6 animate-spin text-primary" />
+      <p>Loading quiz…</p>
+    </div>
+  );
+
+  if (error) return (
+    <div className="flex flex-col items-center justify-center min-h-screen gap-3">
+      <AlertCircle className="h-10 w-10 text-destructive" />
+      <p className="text-muted-foreground">{error}</p>
+      <Button variant="outline" onClick={() => navigate(-1)}>Go Back</Button>
+    </div>
+  );
+
+  if (quizzes.length === 0) return (
+    <div className="flex flex-col items-center justify-center min-h-screen gap-3">
+      <HelpCircle className="h-10 w-10 text-muted-foreground" />
+      <p className="text-muted-foreground">No quiz available for this lesson.</p>
+      <Button variant="outline" onClick={() => navigate(-1)}>Go Back</Button>
+    </div>
+  );
+
+  // ── Render: pick difficulty ────────────────────────────────────────────────
+
+  if (phase === "pick-difficulty") {
+    const bestByDiff: Record<string, QuizAttemptDto> = {};
+    pastAttempts.forEach((a) => {
+      if (!bestByDiff[a.difficulty] || a.score > bestByDiff[a.difficulty].score) {
+        bestByDiff[a.difficulty] = a;
+      }
+    });
 
     return (
-      <div className="container max-w-3xl py-8">
-        <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="text-center mb-8"
-        >
-          <div className={`rounded-full p-6 w-fit mx-auto mb-6 ${passed ? "bg-success/10" : "bg-destructive/10"}`}>
-            {passed
-              ? <Trophy className="h-16 w-16 text-success" />
-              : <XCircle className="h-16 w-16 text-destructive" />}
-          </div>
-          <h1 className="text-3xl font-bold mb-2">
-            {passed ? "Congratulations!" : "Keep Practicing!"}
-          </h1>
-          <p className="text-muted-foreground">
-            {passed
-              ? `You passed the ${meta.label} quiz!`
-              : `You need ${meta.passingScore}% to pass. Try again!`}
-          </p>
-        </motion.div>
+      <div className="min-h-screen bg-background flex flex-col">
+        <div className="flex items-center gap-3 px-4 py-3 border-b">
+          <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h1 className="font-semibold">Choose Difficulty</h1>
+        </div>
 
-        {/* Score summary */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="border rounded-xl p-6 mb-6"
-        >
-          <div className="grid grid-cols-3 gap-6 text-center">
-            <div>
-              <p className={`text-4xl font-bold ${passed ? "text-success" : "text-destructive"}`}>{score}%</p>
-              <p className="text-sm text-muted-foreground">Your Score</p>
-            </div>
-            <div>
-              <p className="text-4xl font-bold">{correct}/{quiz.questions.length}</p>
-              <p className="text-sm text-muted-foreground">Correct</p>
-            </div>
-            <div>
-              <p className={`text-4xl font-bold ${meta.color}`}>{meta.passingScore}%</p>
-              <p className="text-sm text-muted-foreground">To Pass</p>
-            </div>
+        <div className="flex-1 flex flex-col items-center justify-center p-6 space-y-6 max-w-md mx-auto w-full">
+          <div className="text-center space-y-2">
+            <HelpCircle className="h-12 w-12 text-primary mx-auto" />
+            <h2 className="text-xl font-bold">Lesson Quiz</h2>
+            <p className="text-sm text-muted-foreground">Select a difficulty level to begin.</p>
           </div>
-        </motion.div>
 
-        {/* Answer review */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3 }}
-          className="space-y-4 mb-8"
-        >
-          <h2 className="text-xl font-bold">Review Your Answers</h2>
-          {quiz.questions.map((q, i) => {
-            const isCorrect = answers[q.id] === q.correctAnswer;
-            return (
-              <div
-                key={q.id}
-                className={`p-4 border rounded-lg ${
-                  isCorrect
-                    ? "border-success/50 bg-success/5"
-                    : "border-destructive/50 bg-destructive/5"
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  {isCorrect
-                    ? <CheckCircle className="h-5 w-5 text-success mt-0.5 shrink-0" />
-                    : <XCircle    className="h-5 w-5 text-destructive mt-0.5 shrink-0" />}
-                  <div className="flex-1">
-                    <p className="font-medium mb-2">{i + 1}. {q.question}</p>
-                    <p className="text-sm mb-1">
-                      Your answer:{" "}
-                      <span className={isCorrect ? "text-success" : "text-destructive"}>
-                        {q.options[answers[q.id]] ?? "Not answered"}
-                      </span>
-                    </p>
-                    {!isCorrect && (
-                      <p className="text-sm text-success">
-                        Correct: {q.options[q.correctAnswer]}
+          <div className="w-full space-y-3">
+            {quizzes.map((quiz) => {
+              const best = bestByDiff[quiz.difficulty];
+              return (
+                <button
+                  key={quiz.difficulty}
+                  onClick={() => startQuiz(quiz)}
+                  className={`w-full border rounded-xl p-4 text-left transition-colors ${DIFF_COLORS[quiz.difficulty]}`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="font-semibold capitalize">{quiz.difficulty}</p>
+                      <p className="text-xs opacity-75 mt-0.5">
+                        {quiz.questions.length} questions ·{" "}
+                        {quiz.difficulty === "easy" ? 30 : quiz.difficulty === "medium" ? 45 : 60}s per question
                       </p>
-                    )}
-                    {q.explanation && (
-                      <p className="text-sm text-muted-foreground mt-2">{q.explanation}</p>
-                    )}
+                    </div>
+                    <div className="text-right">
+                      {best ? (
+                        <div>
+                          <p className="text-sm font-bold">{Math.round(best.score)}%</p>
+                          <p className="text-xs opacity-75">Best score</p>
+                        </div>
+                      ) : (
+                        <span className="text-xs opacity-60">Not attempted</span>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </div>
-            );
-          })}
-        </motion.div>
+                </button>
+              );
+            })}
+          </div>
 
-        <div className="flex gap-4 justify-center">
-          <Button variant="outline" onClick={onRetry}>
-            <RotateCcw className="h-4 w-4 mr-2" />
-            Try Different Difficulty
-          </Button>
-          <Button onClick={() => navigate(`/course/${courseId}/learn?lesson=${lessonId}`)}>
-            <Home className="h-4 w-4 mr-2" />
-            Back to Lesson
-          </Button>
+          {pastAttempts.length > 0 && (
+            <Button
+              variant="outline"
+              className="w-full"
+              onClick={() => setPhase("history")}
+            >
+              <History className="h-4 w-4 mr-2" />
+              View Attempt History ({pastAttempts.length})
+            </Button>
+          )}
         </div>
       </div>
     );
   }
 
-  // ── Quiz in progress ─────────────────────────────────────────────────────
-  return (
-    <div className="container max-w-3xl py-8">
-      {/* Header */}
-      <div className="mb-8">
-        <div className="flex items-center gap-2 mb-1">
-          <p className="text-sm text-muted-foreground">{lessonTitle}</p>
-          <Badge className={`text-xs capitalize ${meta.bg} ${meta.color} border`}>
-            {meta.label}
-          </Badge>
-        </div>
-        <h1 className="text-2xl font-bold">Lesson Quiz</h1>
-      </div>
+  // ── Render: quiz in progress ───────────────────────────────────────────────
 
-      {/* Progress + timer */}
-      <div className="flex items-center gap-6 mb-6">
-        <div className="flex-1">
-          <div className="flex justify-between text-sm mb-2">
-            <span>Question {currentQ + 1} of {quiz.questions.length}</span>
-            <span>{answered} answered</span>
+  if (phase === "quiz" && currentQuiz) {
+    const q = currentQuiz.questions[currentIndex];
+    const progress = ((currentIndex) / currentQuiz.questions.length) * 100;
+    const timeColor = timeLeft <= 10 ? "text-red-500" : "text-muted-foreground";
+
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        {/* Top bar */}
+        <div className="flex items-center gap-3 px-4 py-3 border-b">
+          <Button variant="ghost" size="sm" onClick={() => setPhase("pick-difficulty")}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <div className="flex-1">
+            <Progress value={progress} className="h-2" />
           </div>
-          <Progress value={progress} className="h-2" />
+          <span className={`text-sm font-mono font-semibold shrink-0 ${timeColor}`}>
+            <Clock className="h-3.5 w-3.5 inline mr-1" />
+            {formatTime(timeLeft)}
+          </span>
+          <span className="text-sm text-muted-foreground shrink-0">
+            {currentIndex + 1}/{currentQuiz.questions.length}
+          </span>
         </div>
-        <div className={`flex items-center gap-2 px-4 py-2 rounded-lg ${
-          timeLeft < 60 ? "bg-destructive/10 text-destructive" : "bg-muted"
-        }`}>
-          <Clock className="h-4 w-4" />
-          <span className="font-mono font-bold">{formatTime(timeLeft)}</span>
+
+        <div className="flex-1 flex flex-col items-center justify-center p-6 max-w-2xl mx-auto w-full space-y-6">
+          <div className="w-full">
+            <div className="flex items-center gap-2 mb-4">
+              <Badge className={`capitalize ${DIFF_COLORS[currentQuiz.difficulty]}`}>
+                {currentQuiz.difficulty}
+              </Badge>
+              <span className="text-xs text-muted-foreground">Question {currentIndex + 1}</span>
+            </div>
+            <p className="text-base font-semibold leading-snug" dir="auto">{q.text}</p>
+          </div>
+
+          <div className="w-full space-y-2.5">
+            {q.options
+              .sort((a, b) => a.order - b.order)
+              .map((opt, idx) => {
+                let cls = "border rounded-xl p-4 text-left text-sm w-full transition-colors ";
+                if (!showFeedback) {
+                  cls += "hover:border-primary hover:bg-primary/5 cursor-pointer";
+                } else if (idx === q.correctAnswer) {
+                  cls += "bg-green-100 border-green-500 text-green-800";
+                } else if (idx === selectedAnswer && idx !== q.correctAnswer) {
+                  cls += "bg-red-100 border-red-500 text-red-800";
+                } else {
+                  cls += "opacity-50";
+                }
+
+                return (
+                  <button key={opt.id ?? idx} className={cls} onClick={() => handleSelectAnswer(idx)}>
+                    <div className="flex items-center gap-3">
+                      <span className="shrink-0 w-6 h-6 rounded-full border-2 flex items-center justify-center text-xs font-bold">
+                        {String.fromCharCode(65 + idx)}
+                      </span>
+                      <span dir="auto">{opt.text}</span>
+                      {showFeedback && idx === q.correctAnswer && (
+                        <CheckCircle2 className="h-4 w-4 text-green-600 ml-auto shrink-0" />
+                      )}
+                      {showFeedback && idx === selectedAnswer && idx !== q.correctAnswer && (
+                        <XCircle className="h-4 w-4 text-red-600 ml-auto shrink-0" />
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+          </div>
+
+          {showFeedback && q.explanation && (
+            <div className="w-full bg-blue-50 border border-blue-200 rounded-xl p-3 text-sm text-blue-800" dir="auto">
+              <strong>Explanation:</strong> {q.explanation}
+            </div>
+          )}
         </div>
       </div>
+    );
+  }
 
-      {/* Question card */}
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={currentQ}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          className="border rounded-xl p-6 mb-6"
-        >
-          <h2 className="text-xl font-semibold mb-6">{question.question}</h2>
-          <RadioGroup
-            value={answers[question.id]?.toString()}
-            onValueChange={(v) => handleAnswer(question.id, parseInt(v))}
-            className="space-y-3"
-          >
-            {question.options.map((opt, i) => (
-              <div
-                key={i}
-                className={`flex items-center gap-3 p-4 rounded-lg border transition-colors ${
-                  answers[question.id] === i
-                    ? "border-accent bg-accent/5"
-                    : "hover:bg-muted/50"
-                }`}
-              >
-                <RadioGroupItem value={i.toString()} id={`opt-${i}`} />
-                <Label htmlFor={`opt-${i}`} className="flex-1 cursor-pointer">{opt}</Label>
+  // ── Render: result ────────────────────────────────────────────────────────
+
+  if (phase === "result" && attemptResult) {
+    const { score, correctAnswers, totalQuestions, passed, pointsEarned } = attemptResult;
+
+    return (
+      <div className="min-h-screen bg-background flex flex-col items-center justify-center p-6">
+        <div className="max-w-md w-full space-y-6 text-center">
+          {passed ? (
+            <Trophy className="h-16 w-16 text-amber-500 mx-auto" />
+          ) : (
+            <XCircle className="h-16 w-16 text-red-400 mx-auto" />
+          )}
+
+          <div>
+            <h2 className="text-2xl font-bold">{passed ? "Great job!" : "Keep practicing!"}</h2>
+            <p className="text-muted-foreground text-sm mt-1">
+              {passed ? "You passed this quiz." : `You need ${PASS_THRESHOLD}% to pass.`}
+            </p>
+          </div>
+
+          {passed && pointsEarned > 0 && (
+            <div className="inline-flex items-center gap-1.5 bg-primary/10 text-primary font-semibold text-sm px-4 py-1.5 rounded-full animate-in fade-in zoom-in duration-300">
+              <Sparkles className="h-4 w-4" />
+              +{pointsEarned} points
+            </div>
+          )}
+
+          <Card>
+            <CardContent className="pt-5 space-y-3">
+              <div className="text-4xl font-bold" style={{ color: passed ? "#16a34a" : "#ef4444" }}>
+                {Math.round(score)}%
               </div>
-            ))}
-          </RadioGroup>
-        </motion.div>
-      </AnimatePresence>
+              <Progress value={score} className="h-3" />
+              <div className="grid grid-cols-2 gap-3 text-sm pt-1">
+                <div className="border rounded-lg p-2.5">
+                  <p className="text-muted-foreground text-xs">Correct</p>
+                  <p className="font-bold text-lg text-green-600">{correctAnswers}</p>
+                </div>
+                <div className="border rounded-lg p-2.5">
+                  <p className="text-muted-foreground text-xs">Incorrect</p>
+                  <p className="font-bold text-lg text-red-500">{totalQuestions - correctAnswers}</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-      {/* Navigation */}
-      <div className="flex justify-between">
-        <Button variant="outline" onClick={() => setCurrentQ((p) => p - 1)} disabled={currentQ === 0}>
-          <ArrowLeft className="h-4 w-4 mr-2" />Previous
-        </Button>
-        {currentQ === quiz.questions.length - 1 ? (
-          <Button onClick={handleSubmit} disabled={answered < quiz.questions.length}>
-            Submit Quiz
-          </Button>
-        ) : (
-          <Button onClick={() => setCurrentQ((p) => p + 1)}>
-            Next<ArrowRight className="h-4 w-4 ml-2" />
-          </Button>
-        )}
+          <div className="space-y-2">
+            <Button className="w-full" onClick={() => {
+              const quiz = quizzes.find((q) => q.difficulty === selectedDifficulty);
+              if (quiz) startQuiz(quiz);
+            }}>
+              <RotateCcw className="h-4 w-4 mr-2" />
+              Try Again
+            </Button>
+            <Button variant="outline" className="w-full" onClick={() => setPhase("pick-difficulty")}>
+              Change Difficulty
+            </Button>
+            <Button variant="ghost" className="w-full" onClick={() => navigate(-1)}>
+              Back to Lesson
+            </Button>
+          </div>
+        </div>
       </div>
+    );
+  }
 
-      {/* Question navigator */}
-      <div className="mt-8 p-4 bg-muted/30 rounded-lg">
-        <p className="text-sm font-medium mb-3">Question Navigator</p>
-        <div className="flex flex-wrap gap-2">
-          {quiz.questions.map((q, i) => (
-            <button
-              key={q.id}
-              onClick={() => setCurrentQ(i)}
-              className={`w-10 h-10 rounded-lg text-sm font-medium transition-colors ${
-                currentQ === i
-                  ? "bg-accent text-accent-foreground"
-                  : answers[q.id] !== undefined
-                    ? "bg-success/20 text-success"
-                    : "bg-muted hover:bg-muted/80"
-              }`}
-            >
-              {i + 1}
-            </button>
+  // ── Render: history ────────────────────────────────────────────────────────
+
+  if (phase === "history") {
+    const DIFF_BADGE: Record<string, string> = {
+      easy: "bg-green-100 text-green-700",
+      medium: "bg-amber-100 text-amber-700",
+      hard: "bg-red-100 text-red-700",
+    };
+
+    return (
+      <div className="min-h-screen bg-background flex flex-col">
+        <div className="flex items-center gap-3 px-4 py-3 border-b">
+          <Button variant="ghost" size="sm" onClick={() => setPhase("pick-difficulty")}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h1 className="font-semibold">Attempt History</h1>
+        </div>
+
+        <div className="flex-1 p-4 max-w-md mx-auto w-full space-y-3">
+          {pastAttempts.map((attempt) => (
+            <div key={attempt.id} className="border rounded-xl p-4 flex items-center justify-between">
+              <div className="space-y-1">
+                <span className={`text-xs px-2 py-0.5 rounded-full font-medium capitalize ${DIFF_BADGE[attempt.difficulty] ?? "bg-muted"}`}>
+                  {attempt.difficulty}
+                </span>
+                <p className="text-xs text-muted-foreground">
+                  {new Date(attempt.completedAt).toLocaleString()}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {attempt.correctAnswers}/{attempt.totalQuestions} correct
+                </p>
+              </div>
+              <div className="text-right">
+                <p className={`text-xl font-bold ${attempt.passed ? "text-green-600" : "text-red-500"}`}>
+                  {Math.round(attempt.score)}%
+                </p>
+                <Badge variant="secondary" className={`text-xs ${attempt.passed ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>
+                  {attempt.passed ? "Passed" : "Failed"}
+                </Badge>
+              </div>
+            </div>
           ))}
         </div>
       </div>
-    </div>
-  );
-}
+    );
+  }
 
-// ── Main page ─────────────────────────────────────────────────────────────────
-
-export default function QuizPage() {
-  const { courseId, lessonId, quizId } = useParams<{
-    courseId: string;
-    lessonId?: string;
-    quizId?:  string;
-  }>();
-  const navigate = useNavigate();
-
-  const [quizzes, setQuizzes]           = useState<LessonQuiz[]>([]);
-  const [lessonTitle, setLessonTitle]   = useState("");
-  const [loading, setLoading]           = useState(true);
-  const [error, setError]               = useState<string | null>(null);
-  const [selectedDiff, setSelectedDiff] = useState<Difficulty | null>(null);
-
-  // Resolve which lesson we're quizzing
-  const resolvedLessonId = lessonId ?? quizId ?? "";
-
-  useEffect(() => {
-    if (!courseId || !resolvedLessonId) return;
-    setLoading(true);
-
-    // Fetch quizzes for this lesson from the course detail endpoint
-    api
-      .get(`/course/${courseId}/lesson/${resolvedLessonId}/quizzes`)
-      .then((res) => {
-        const data = res.data?.data ?? {};
-        setLessonTitle(data.lessonTitle ?? "Lesson Quiz");
-        // Map question ids if missing
-        const mapped: LessonQuiz[] = (data.quizzes ?? []).map((q: any) => ({
-          ...q,
-          questions: (q.questions ?? []).map((qq: any, i: number) => ({
-            ...qq,
-            id: qq.id ?? `${q.id}-${i}`,
-          })),
-        }));
-        setQuizzes(mapped);
-      })
-      .catch(() => setError("Could not load quiz."))
-      .finally(() => setLoading(false));
-  }, [courseId, resolvedLessonId]);
-
-  if (loading) return (
-    <MainLayout>
-      <div className="flex items-center justify-center min-h-[60vh] gap-3 text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin text-primary" />
-        <p>Loading quiz…</p>
-      </div>
-    </MainLayout>
-  );
-
-  if (error || quizzes.length === 0) return (
-    <MainLayout>
-      <div className="container max-w-xl py-16 text-center space-y-4">
-        <AlertCircle className="h-12 w-12 mx-auto text-destructive" />
-        <p className="text-lg font-semibold">{error ?? "No quiz available for this lesson yet."}</p>
-        <Button variant="outline" onClick={() => navigate(-1)}>Go Back</Button>
-      </div>
-    </MainLayout>
-  );
-
-  const activeQuiz = selectedDiff
-    ? quizzes.find((q) => q.difficulty === selectedDiff) ?? null
-    : null;
-
-  return (
-    <MainLayout>
-      {!selectedDiff || !activeQuiz ? (
-        <DifficultyPicker
-          quizzes={quizzes}
-          lessonTitle={lessonTitle}
-          onSelect={setSelectedDiff}
-        />
-      ) : (
-        <QuizRunner
-          quiz={activeQuiz}
-          lessonTitle={lessonTitle}
-          courseId={courseId!}
-          lessonId={resolvedLessonId}
-          onRetry={() => setSelectedDiff(null)}
-        />
-      )}
-    </MainLayout>
-  );
+  return null;
 }

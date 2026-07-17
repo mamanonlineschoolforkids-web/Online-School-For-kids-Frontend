@@ -43,6 +43,12 @@ export interface ConfirmPayResult {
   amountCharged: number;
 }
 
+export interface BookedSlot {
+  time: string;               // "HH:mm"
+  status: "Reserved" | "Booked"; // Reserved = held, not yet paid; Booked = confirmed
+  holdExpiresAtUtc?: string | null; // only present when status === "Reserved"
+}
+
 export const appointmentService = {
   /** Step 1 — reserve the slot. Returns { id, status: "Pending" }. */
   bookSession: async (data: BookSessionDto): Promise<{ id: string; status: string }> => {
@@ -68,10 +74,11 @@ export const appointmentService = {
   },
 
   /**
-   * Returns "HH:mm" strings for all taken slots on a given date.
-   * Includes Pending (held) and Confirmed slots so both appear unavailable.
+   * Returns all taken slots on a given date, distinguishing between a slot
+   * someone else has *reserved* (Pending — still on a 30-min hold, may free up)
+   * and one that's fully *booked* (Confirmed — genuinely unavailable).
    */
-  getBookedSlots: async (specialistId: string, date: string): Promise<string[]> => {
+  getBookedSlots: async (specialistId: string, date: string): Promise<BookedSlot[]> => {
     const res = await api.get('/Appointment/booked-slots', {
       params: { specialistId, date },
     });
@@ -80,6 +87,10 @@ export const appointmentService = {
 
   cancelAppointment: async (id: string, reason?: string): Promise<void> => {
     await api.put(`/Appointment/${id}/cancel`, { reason });
+  },
+
+  confirmAppointment: async (id: string): Promise<void> => {
+    await api.put(`/Appointment/${id}/confirm`);
   },
 
   completeAppointment: async (id: string): Promise<void> => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -232,6 +232,9 @@ export default function SingleLessonReviewPage() {
   const [activeQuizTab, setActiveQuizTab] = useState<string>("easy");
   const [saving, setSaving] = useState(false);
 
+  const [videoDuration, setVideoDuration] = useState(0);
+const videoRef = useRef<HTMLVideoElement>(null);
+
   // ── Load job ────────────────────────────────────────────────────────────────
 
   const fetchJob = useCallback(() => {
@@ -252,6 +255,15 @@ export default function SingleLessonReviewPage() {
   }, [jobId]);
 
   useEffect(() => { fetchJob(); }, [jobId]);
+
+  useEffect(() => {
+  if (job?.sourceType !== "upload") return;
+  const video = videoRef.current;
+  if (!video) return;
+  const onMeta = () => setVideoDuration(Math.round(video.duration));
+  video.addEventListener("loadedmetadata", onMeta);
+  return () => video.removeEventListener("loadedmetadata", onMeta);
+}, [job?.videoUrl, job?.sourceType]);
 
   const chunk = job?.chunks[0] ?? null;
 
@@ -371,12 +383,14 @@ export default function SingleLessonReviewPage() {
 
     setSaving(true);
     try {
-      await videoProcessingService.saveChunkAsLesson(jobId, chunk.id, {
-        title: title.trim(),
-        transcript,
-        order,
-        isFree,
-      });
+
+await videoProcessingService.saveChunkAsLesson(jobId, chunk.id, {
+  title: title.trim(),
+  transcript,
+  order,
+  isFree,
+  duration: videoDuration,
+});
       toast({ title: "Lesson saved ✓" });
       navigate(`/creator/courses/${courseId}?tab=curriculum`);
     } catch (err: any) {
@@ -465,13 +479,13 @@ export default function SingleLessonReviewPage() {
           <Card>
             <CardContent className="pt-4 pb-3">
               <YoutubePlayer
-                url={job.sourceUrl}
-                playing={false}
-                seekRequest={null}
-                onReady={() => {}}
-                onTimeUpdate={() => {}}
-                onPlayStateChange={() => {}}
-              />
+     url={job.sourceUrl}
+     playing={false}
+     seekRequest={null}
+     onReady={(d) => setVideoDuration(Math.round(d))}
+     onTimeUpdate={() => {}}
+     onPlayStateChange={() => {}}
+   />
             </CardContent>
           </Card>
         )}

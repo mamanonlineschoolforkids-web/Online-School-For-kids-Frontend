@@ -78,7 +78,7 @@ interface CourseDto {
   isInCart:            boolean;
 }
 
-const LANGUAGES = ["English", "Arabic", "Spanish", "French", "German"];
+// const LANGUAGES = ["English", "Arabic", "Spanish", "French", "German"];
 const PAGE_SIZE = 12;
 const CATEGORIES_INITIAL_COUNT = 3;
 
@@ -318,18 +318,19 @@ export default function CoursesCatalogPage() {
   const [showAllCategories,  setShowAllCategories]  = useState(false);
   const [fetchTrigger,       setFetchTrigger]       = useState(0);
 
-  const [courses,    setCourses]    = useState<CourseDto[]>([]);
+const [courses,    setCourses]    = useState<CourseDto[]>([]);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [isLoading,  setIsLoading]  = useState(false);
   const [error,      setError]      = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoryDto[]>([]);
+  const [languages,  setLanguages]  = useState<string[]>([]);
 
   const { addItem, isInCart } = useCartStore();
   const wishlistIncrement = useWishlistStore((s) => s.increment);
   const wishlistDecrement = useWishlistStore((s) => s.decrement);
 
-  useEffect(() => {
+useEffect(() => {
     document.documentElement.style.scrollbarGutter = "stable";
     return () => { document.documentElement.style.scrollbarGutter = ""; };
   }, []);
@@ -341,6 +342,12 @@ export default function CoursesCatalogPage() {
         const list = Array.isArray(payload) ? payload : payload.items;
         setCategories([...list].sort((a, b) => a.displayOrder - b.displayOrder));
       })
+      .catch(() => {});
+  }, []);
+
+    useEffect(() => {
+    api.get<ApiResponse<{ languages: string[] }>>("/course/filters")
+      .then((r) => setLanguages(r.data.data.languages ?? []))
       .catch(() => {});
   }, []);
 
@@ -518,7 +525,7 @@ export default function CoursesCatalogPage() {
       <div className="space-y-2">
         <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground px-1">Language</h3>
         <div className="space-y-1.5">
-          {LANGUAGES.map(lang => (
+           {languages.map(lang => (
             <div key={lang} className="flex items-center space-x-2 px-2">
               <Checkbox id={`lang-${lang}`} checked={selectedLanguages.includes(lang)}
                 onCheckedChange={c => setSelectedLanguages(p => c ? [...p, lang] : p.filter(l => l !== lang))} />

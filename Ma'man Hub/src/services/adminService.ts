@@ -217,6 +217,63 @@ export interface BulkActionResponse {
   message: string;
 }
 
+// ── Dashboard ────────────────────────────────────────────────────────────────
+
+export interface MonthlyCount {
+  month: string;
+  value: number;
+}
+
+export interface MonthlyRevenue {
+  month: string;
+  revenue: number;
+}
+
+export interface CategoryEnrollment {
+  name: string;
+  enrollments: number;
+}
+
+export interface RoleDistributionItem {
+  name: string;
+  value: number;
+}
+
+export interface RecentTransaction {
+  id: string;
+  userName: string;
+  courseName: string;
+  amount: number;
+  date: string;
+  status: string;
+}
+
+export interface RecentRegistration {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  date: string;
+}
+
+export interface AdminDashboardStats {
+  totalUsers: number;
+  totalUsersChangePercent: number;
+  activeUsers: number;
+  activeUsersChangePercent: number;
+  totalRevenue: number;
+  totalRevenueChangePercent: number;
+  totalCourses: number;
+  totalCoursesChangePercent: number;
+  pendingReviews: number;
+  userRegistrations: MonthlyCount[];
+  revenue: MonthlyRevenue[];
+  enrollmentsByCategory: CategoryEnrollment[];
+  roleDistribution: RoleDistributionItem[];
+  recentTransactions: RecentTransaction[];
+  recentRegistrations: RecentRegistration[];
+}
+
 // ── Service ──────────────────────
 
 export const adminService = {
@@ -307,5 +364,11 @@ createAdmin: async (data: CreateAdminData): Promise<CreatedAdminDto> => {
   /** PUT /Admin/users/:userId/change-password  (SuperAdmin only) */
   changeUserPassword: async (userId: string, newPassword: string): Promise<void> => {
     await api.put(`/Admin/users/${userId}/change-password`, { newPassword });
+  },
+
+  /** GET /Admin/dashboard-stats */
+  getDashboardStats: async (): Promise<AdminDashboardStats> => {
+    const response = await api.get('/Admin/dashboard-stats');
+    return response.data;
   },
 }

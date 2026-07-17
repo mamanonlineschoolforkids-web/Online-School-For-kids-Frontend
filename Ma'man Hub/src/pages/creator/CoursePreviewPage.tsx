@@ -353,7 +353,7 @@ export default function CoursePreviewPage() {
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
         <AlertCircle className="h-10 w-10 text-destructive" />
         <p className="text-muted-foreground">{error ?? "Course not found"}</p>
-        <Button variant="outline" onClick={() => navigate("/creator/my-courses")}>Back</Button>
+        <Button variant="outline" onClick={() => navigate("/ContentCreator/my-courses")}>Back</Button>
       </div>
     </DashboardLayout>
   );

@@ -10,10 +10,12 @@ import {
 
 const footerLinks = {
   platform: [
-    { name: "Courses", href: "/courses" },
+    { name: "Categories", href: "/categories" },
+    { name: "Specialists", href: "/specialists" },
     { name: "Instructors", href: "/instructors" },
-    { name: "Pricing", href: "/pricing" },
-    { name: "For Parents", href: "/parents" },
+    { name: "Leaderboard", href: "/leaderboard" },
+    { name: "Feeds", href: "/feeds" },
+
   ],
   resources: [
     { name: "Blog", href: "/blog" },
@@ -47,7 +49,7 @@ export function Footer() {
                 <GraduationCap className="w-6 h-6 text-white" />
               </div>
               <span className="font-display font-bold text-xl">
-                Elm<span className="text-indigo-400">Hub</span>
+                Ma'<span className="text-indigo-400">Man</span>
               </span>
             </Link>
             <p className="text-gray-300 mb-6 max-w-sm">
@@ -68,84 +70,6 @@ export function Footer() {
             </div>
           </div>
 
-          {/* Links */}
-          <div>
-            <h4 className="font-semibold mb-4">Platform</h4>
-            <ul className="space-y-3">
-              {footerLinks.platform.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    to={link.href}
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="font-semibold mb-4">Resources</h4>
-            <ul className="space-y-3">
-              {footerLinks.resources.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    to={link.href}
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          <div>
-            <h4 className="font-semibold mb-4">Legal</h4>
-            <ul className="space-y-3">
-              {footerLinks.legal.map((link) => (
-                <li key={link.name}>
-                  <Link
-                    to={link.href}
-                    className="text-gray-400 hover:text-white transition-colors"
-                  >
-                    {link.name}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-
-        {/* Newsletter */}
-        <div className="mt-12 pt-8 border-t border-gray-700">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-3">
-              <Mail className="w-5 h-5 text-indigo-400" />
-              <span className="text-gray-300">
-                Subscribe to our newsletter for updates
-              </span>
-            </div>
-            <div className="flex gap-3 w-full md:w-auto">
-              <input
-                type="email"
-                placeholder="Enter your email"
-                className="flex-1 md:w-64 px-4 py-2 rounded-lg bg-gray-800 border border-gray-700 text-gray-100 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-              <button className="px-6 py-2 rounded-lg bg-indigo-600 text-white font-semibold hover:bg-indigo-500 transition-colors">
-                Subscribe
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {/* Copyright */}
-        <div className="mt-8 pt-8 border-t border-gray-700 text-center text-gray-400 text-sm">
-          <p>
-            © 2024 ElmHub. All rights reserved. Made with ❤️ for learners
-            everywhere.
-          </p>
         </div>
       </div>
     </footer>

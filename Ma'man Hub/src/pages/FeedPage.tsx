@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   MessageCircle, Share2, Image, Video, Send, MoreHorizontal,
   Trash2, X, Facebook, Linkedin, Copy, Check, MessageSquare,
-  Smile, Globe, Lock, Users, UserPlus,
+  Smile, Globe, Lock, Users, UserPlus, Flag, Loader2,
 } from "lucide-react";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
@@ -22,6 +22,16 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { useToast } from "@/hooks/use-toast";
+import { moderationService, type ReportReason } from "@/services/moderationService";
 import { useAuthStore } from "@/stores/authStore";
 import { toast } from "@/hooks/use-toast";
 import { formatDistanceToNow } from "date-fns";
@@ -226,6 +236,7 @@ function PostCard({
   onDelete,
   onShareTracked,
   onFollowToggle,
+  onReport,
 }: {
   post: Post;
   localReaction?: LocalReaction;
@@ -241,6 +252,7 @@ function PostCard({
   onDelete: () => void;
   onShareTracked: () => void;
   onFollowToggle: (isFollowing: boolean) => void;
+  onReport: () => void;
 }) {
   const navigate = useNavigate();
   const reactionCounts = localReaction?.counts ?? post.reactionCounts;
@@ -303,7 +315,7 @@ function PostCard({
               />
             )}
 
-            {isOwner && (
+            {isLoggedIn && (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button variant="ghost" size="icon" className="h-8 w-8">
@@ -311,9 +323,15 @@ function PostCard({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
-                  <DropdownMenuItem className="text-destructive" onClick={onDelete}>
-                    <Trash2 className="h-4 w-4 mr-2" /> Delete
-                  </DropdownMenuItem>
+                  {isOwner ? (
+                    <DropdownMenuItem className="text-destructive" onClick={onDelete}>
+                      <Trash2 className="h-4 w-4 mr-2" /> Delete
+                    </DropdownMenuItem>
+                  ) : (
+                    <DropdownMenuItem onClick={onReport}>
+                      <Flag className="h-4 w-4 mr-2" /> Report
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -438,14 +456,13 @@ function PostCard({
   );
 }
 
-// ── Section header ─────────────────────────────────────────────────────────────
+// ── Empty state ───────────────────────────────────────────────────────────────
 
-function SectionHeader({ icon, title, count }: { icon: React.ReactNode; title: string; count: number }) {
+function EmptyTab({ text }: { text: string }) {
   return (
-    <div className="flex items-center gap-2 px-1">
-      {icon}
-      <h2 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide">{title}</h2>
-      <Badge variant="secondary" className="text-xs">{count}</Badge>
+    <div className="text-center py-12 text-muted-foreground">
+      <MessageSquare className="h-10 w-10 mx-auto mb-3 opacity-30" />
+      <p className="text-sm">{text}</p>
     </div>
   );
 }
@@ -458,6 +475,47 @@ export default function FeedPage() {
   const { user } = useAuthStore();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  // Report content
+  const [reportTarget, setReportTarget] = useState<{ id: string; title: string } | null>(null);
+  const [reportReason, setReportReason] = useState<ReportReason>("Spam");
+  const [reportDescription, setReportDescription] = useState("");
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+
+  const closeReportDialog = () => {
+    setReportTarget(null);
+    setReportReason("Spam");
+    setReportDescription("");
+  };
+
+  const handleSubmitReport = async () => {
+    if (!reportTarget) return;
+    if (!reportDescription.trim() || reportDescription.trim().length < 10) {
+      toast({ title: "Please add more detail", description: "Description must be at least 10 characters.", variant: "destructive" });
+      return;
+    }
+    setIsSubmittingReport(true);
+    try {
+      const ok = await moderationService.reportContent({
+        contentType: "Post",
+        contentId: reportTarget.id,
+        contentTitle: reportTarget.title,
+        reason: reportReason,
+        description: reportDescription.trim(),
+      });
+      if (ok) {
+        toast({ title: "Report submitted", description: "Thanks — our moderation team will review it." });
+        closeReportDialog();
+      } else {
+        toast({ title: "You've already reported this", variant: "destructive" });
+      }
+    } catch (err: any) {
+      toast({ title: "Couldn't submit report", description: err?.response?.data?.message, variant: "destructive" });
+    } finally {
+      setIsSubmittingReport(false);
+    }
+  };
 
   // Compose
   const [content, setContent]               = useState("");
@@ -636,6 +694,7 @@ export default function FeedPage() {
         onDelete={() => handleDelete(post.id)}
         onShareTracked={() => queryClient.invalidateQueries({ queryKey: ["feed-posts", user?.id ?? "guest"] })}
         onFollowToggle={() => queryClient.invalidateQueries({ queryKey: ["feed-posts", user?.id ?? "guest"] })}
+        onReport={() => setReportTarget({ id: post.id, title: post.content?.slice(0, 100) || "Post" })}
       />
     </motion.div>
   );
@@ -767,58 +826,98 @@ export default function FeedPage() {
           </Card>
         )}
 
-        {/* ── Following section ── */}
-        {!isLoading && !isError && followingPosts.length > 0 && (
-          <div className="space-y-3">
-            <SectionHeader
-              icon={<Users className="h-4 w-4 text-primary" />}
-              title="People you follow"
-              count={followingPosts.length}
-            />
-            <AnimatePresence>
-              {followingPosts.map((post, i) => renderPost(post, i))}
-            </AnimatePresence>
-          </div>
-        )}
-
-        {/* ── Friends-of-friends section ── */}
-        {!isLoading && !isError && fofPosts.length > 0 && (
-          <div className="space-y-3">
-            <SectionHeader
-              icon={<UserPlus className="h-4 w-4 text-accent" />}
-              title="Suggested for you"
-              count={fofPosts.length}
-            />
-            <AnimatePresence>
-              {fofPosts.map((post, i) => renderPost(post, i))}
-            </AnimatePresence>
-          </div>
-        )}
-
-        {/* ── Public section ── */}
+        {/* ── Tabs: Following / Suggested / Public ── */}
         {!isLoading && !isError && (
-          <div className="space-y-3">
-            {(followingPosts.length > 0 || fofPosts.length > 0) && (
-              <SectionHeader
-                icon={<Globe className="h-4 w-4 text-muted-foreground" />}
-                title="Public posts"
-                count={publicPosts.length}
-              />
-            )}
-            <AnimatePresence>
-              {publicPosts.map((post, i) => renderPost(post, i))}
-            </AnimatePresence>
+          <Tabs defaultValue="following" className="w-full">
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="following" className="gap-1.5">
+                <Users className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Following</span>
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{followingPosts.length}</Badge>
+              </TabsTrigger>
+              <TabsTrigger value="suggested" className="gap-1.5">
+                <UserPlus className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Suggested</span>
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{fofPosts.length}</Badge>
+              </TabsTrigger>
+              <TabsTrigger value="public" className="gap-1.5">
+                <Globe className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Public</span>
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0">{publicPosts.length}</Badge>
+              </TabsTrigger>
+            </TabsList>
 
-            {followingPosts.length === 0 && fofPosts.length === 0 && publicPosts.length === 0 && (
-              <div className="text-center py-12 text-muted-foreground">
-                <MessageSquare className="h-10 w-10 mx-auto mb-3 opacity-30" />
-                <p className="text-sm">No posts yet. Be the first to share something!</p>
-              </div>
-            )}
-          </div>
+            <TabsContent value="following" className="space-y-3 mt-4">
+              <AnimatePresence>
+                {followingPosts.length > 0
+                  ? followingPosts.map((post, i) => renderPost(post, i))
+                  : <EmptyTab text="Posts from people you follow will show up here." />}
+              </AnimatePresence>
+            </TabsContent>
+
+            <TabsContent value="suggested" className="space-y-3 mt-4">
+              <AnimatePresence>
+                {fofPosts.length > 0
+                  ? fofPosts.map((post, i) => renderPost(post, i))
+                  : <EmptyTab text="No suggested posts right now — follow more people to see friends-of-friends here." />}
+              </AnimatePresence>
+            </TabsContent>
+
+            <TabsContent value="public" className="space-y-3 mt-4">
+              <AnimatePresence>
+                {publicPosts.length > 0
+                  ? publicPosts.map((post, i) => renderPost(post, i))
+                  : <EmptyTab text="No public posts yet. Be the first to share something!" />}
+              </AnimatePresence>
+            </TabsContent>
+          </Tabs>
         )}
 
       </div>
+
+      <Dialog open={!!reportTarget} onOpenChange={(open) => !open && closeReportDialog()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Report Post</DialogTitle>
+            <DialogDescription>
+              Let us know what's wrong — our moderation team will review it.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Reason</Label>
+              <Select value={reportReason} onValueChange={(v) => setReportReason(v as ReportReason)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Spam">Spam</SelectItem>
+                  <SelectItem value="Harassment">Harassment</SelectItem>
+                  <SelectItem value="InappropriateContent">Inappropriate content</SelectItem>
+                  <SelectItem value="Copyright">Copyright violation</SelectItem>
+                  <SelectItem value="Misinformation">Misinformation</SelectItem>
+                  <SelectItem value="Other">Other</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="report-desc">Details</Label>
+              <Textarea
+                id="report-desc"
+                placeholder="Tell us more about the issue (at least 10 characters)..."
+                value={reportDescription}
+                onChange={(e) => setReportDescription(e.target.value)}
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeReportDialog} disabled={isSubmittingReport}>Cancel</Button>
+            <Button onClick={handleSubmitReport} disabled={isSubmittingReport}>
+              {isSubmittingReport && <Loader2 className="h-4 w-4 animate-spin mr-1.5" />}
+              Submit Report
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainLayout>
   );
 }

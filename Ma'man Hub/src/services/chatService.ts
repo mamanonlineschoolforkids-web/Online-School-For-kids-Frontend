@@ -159,6 +159,9 @@ export const chatApi = {
       .post<ConversationDto>("/chat/conversations", { otherUserId })
       .then((r) => r.data),
 
+  deleteConversation: (conversationId: string) =>
+    api.delete(`/chat/conversations/${conversationId}`),
+
   // DM Messages
   getDmMessages: (conversationId: string, cursor?: string, pageSize = 30) =>
     api

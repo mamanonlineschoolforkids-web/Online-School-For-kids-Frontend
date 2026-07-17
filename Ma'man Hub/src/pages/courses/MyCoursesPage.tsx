@@ -1,300 +1,238 @@
 import { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
-import { motion } from "framer-motion";
-import { Search, Filter, Clock, BookOpen, CheckCircle, Loader2, AlertCircle } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Progress } from "@/components/ui/progress";
+import { useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import api from "@/services/api";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Progress } from "@/components/ui/progress";
+import { Badge } from "@/components/ui/badge";
+import {
+  Search, BookOpen, PlayCircle, Star, Users, Loader2,
+  AlertCircle, ChevronRight, Clock, Trophy,
+} from "lucide-react";
+import { studentService, EnrolledCourse } from "@/services/studentService";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface EnrolledCourse {
-  enrollmentId:     string;
-  courseId:         string;
-  title:            string;
-  instructor:       string;
-  thumbnail:        string | null;
-  progress:         number;
-  lastAccessedAt:   string | null;
-  totalLessons:     number;
-  completedLessons: number;
-  duration:         string;
-  status:           "not_started" | "in_progress" | "completed";
-  enrolledAt:       string;
-  isCompleted:      boolean;
-  completedAt:      string | null;
+function formatProgress(pct: number) {
+  if (pct === 0) return "Not started";
+  if (pct === 100) return "Completed";
+  return `${Math.round(pct)}% complete`;
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+function EnrolledCourseCard({ course }: { course: EnrolledCourse }) {
+  const navigate = useNavigate();
+  const pct = Math.round(course.progressPercent ?? 0);
+  const isComplete = pct === 100;
+  const isStarted = pct > 0;
+
+  return (
+    <Card className="overflow-hidden hover:shadow-md transition-shadow group cursor-pointer"
+      onClick={() => navigate(`/course/${course.courseId}/learn`)}>
+      <div className="flex gap-0">
+        {/* Thumbnail */}
+        <div className="relative w-48 shrink-0">
+          {course.thumbnailUrl ? (
+            <img
+              src={course.thumbnailUrl}
+              alt={course.title}
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full min-h-[120px] bg-gradient-to-br from-primary/20 to-accent/20 flex items-center justify-center">
+              <BookOpen className="h-10 w-10 text-primary/40" />
+            </div>
+          )}
+          {isComplete && (
+            <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+              <Trophy className="h-8 w-8 text-yellow-400" />
+            </div>
+          )}
+        </div>
+
+        {/* Content */}
+        <CardContent className="flex-1 p-4 flex flex-col justify-between">
+          <div className="space-y-1.5">
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="font-semibold text-sm leading-snug line-clamp-2 group-hover:text-primary transition-colors">
+                {course.title}
+              </h3>
+              {isComplete && (
+                <Badge variant="secondary" className="bg-green-100 text-green-700 shrink-0 text-xs">
+                  Completed
+                </Badge>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">{course.instructorName}</p>
+
+            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                {course.rating?.toFixed(1) ?? "—"}
+              </span>
+              <span className="flex items-center gap-1">
+                <Users className="h-3 w-3" />
+                {course.totalStudents ?? 0}
+              </span>
+              <span className="flex items-center gap-1">
+                <PlayCircle className="h-3 w-3" />
+                {course.completedLessons ?? 0}/{course.totalLessons ?? 0} lessons
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-1.5">
+            <div className="flex items-center justify-between text-xs">
+              <span className={`font-medium ${isComplete ? "text-green-600" : isStarted ? "text-primary" : "text-muted-foreground"}`}>
+                {formatProgress(pct)}
+              </span>
+              <ChevronRight className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
+            </div>
+            <Progress
+              value={pct}
+              className="h-1.5"
+            />
+          </div>
+        </CardContent>
+      </div>
+    </Card>
+  );
+}
 
 export default function MyCoursesPage() {
-  const [courses, setCourses]         = useState<EnrolledCourse[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [error, setError]             = useState<string | null>(null);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [sortBy, setSortBy]           = useState<string>("recent");
+  const navigate = useNavigate();
+  const [courses, setCourses] = useState<EnrolledCourse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"all" | "in-progress" | "completed" | "not-started">("all");
 
-  // ── Fetch enrollments ──────────────────────────────────────────────────────
   useEffect(() => {
-    const fetchEnrollments = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await api.get("/student/enrollments");
-        setCourses(res.data?.data ?? []);
-      } catch (e: any) {
-        setError(e.response?.data?.message ?? "Failed to load your courses. Please try again.");
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchEnrollments();
+    studentService
+      .getEnrolledCourses()
+      .then(setCourses)
+      .catch(() => setError("Could not load your courses."))
+      .finally(() => setLoading(false));
   }, []);
 
-  // ── Filter + sort ──────────────────────────────────────────────────────────
-  const filtered = courses
-    .filter((c) => {
-      const matchesSearch = c.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                            c.instructor.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesStatus = statusFilter === "all" || c.status === statusFilter;
-      return matchesSearch && matchesStatus;
-    })
-    .sort((a, b) => {
-      switch (sortBy) {
-        case "title":
-          return a.title.localeCompare(b.title);
-        case "progress":
-          return b.progress - a.progress;
-        case "recent":
-        default:
-          return (b.lastAccessedAt ?? b.enrolledAt).localeCompare(
-                  a.lastAccessedAt ?? a.enrolledAt);
-      }
-    });
+  const filtered = courses.filter((c) => {
+    const matchSearch = c.title.toLowerCase().includes(search.toLowerCase()) ||
+      c.instructorName.toLowerCase().includes(search.toLowerCase());
+    const pct = c.progressPercent ?? 0;
+    const matchFilter =
+      filter === "all" ||
+      (filter === "completed" && pct === 100) ||
+      (filter === "in-progress" && pct > 0 && pct < 100) ||
+      (filter === "not-started" && pct === 0);
+    return matchSearch && matchFilter;
+  });
 
-  // ── Status counts for summary ─────────────────────────────────────────────
-  const counts = {
-    total:       courses.length,
-    inProgress:  courses.filter((c) => c.status === "in_progress").length,
-    completed:   courses.filter((c) => c.status === "completed").length,
-    notStarted:  courses.filter((c) => c.status === "not_started").length,
+  const stats = {
+    total: courses.length,
+    completed: courses.filter((c) => (c.progressPercent ?? 0) === 100).length,
+    inProgress: courses.filter((c) => {
+      const p = c.progressPercent ?? 0;
+      return p > 0 && p < 100;
+    }).length,
   };
 
-  // ── Status badge ──────────────────────────────────────────────────────────
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case "completed":
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-success/10 text-success">
-            <CheckCircle className="h-3 w-3" /> Completed
-          </span>
-        );
-      case "in_progress":
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-accent/10 text-accent">
-            <BookOpen className="h-3 w-3" /> In Progress
-          </span>
-        );
-      default:
-        return (
-          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-muted text-muted-foreground">
-            <Clock className="h-3 w-3" /> Not Started
-          </span>
-        );
-    }
-  };
+  if (loading) return (
+    <DashboardLayout>
+      <div className="flex items-center justify-center min-h-[60vh] gap-3 text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin text-primary" />
+        <p>Loading your courses…</p>
+      </div>
+    </DashboardLayout>
+  );
 
-  // ── Loading ───────────────────────────────────────────────────────────────
-  if (loading) {
-    return (
-      <DashboardLayout>
-        <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
-          <Loader2 className="h-8 w-8 animate-spin text-primary" />
-          <p>Loading your courses…</p>
-        </div>
-      </DashboardLayout>
-    );
-  }
+  if (error) return (
+    <DashboardLayout>
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-3">
+        <AlertCircle className="h-10 w-10 text-destructive" />
+        <p className="text-muted-foreground">{error}</p>
+        <Button variant="outline" onClick={() => navigate("/courses")}>Browse Courses</Button>
+      </div>
+    </DashboardLayout>
+  );
 
-  // ── Error ────────────────────────────────────────────────────────────────
-  if (error) {
-    return (
-      <DashboardLayout>
-        <div className="flex flex-col items-center justify-center h-64 gap-3 text-muted-foreground">
-          <AlertCircle className="h-10 w-10 text-destructive" />
-          <p className="text-sm">{error}</p>
-          <Button variant="outline" onClick={() => window.location.reload()}>
-            Try Again
-          </Button>
-        </div>
-      </DashboardLayout>
-    );
-  }
-
-  // ── Render ────────────────────────────────────────────────────────────────
   return (
     <DashboardLayout>
-      <div className="space-y-6">
-
+      <div className="space-y-6 max-w-4xl mx-auto">
         {/* Header */}
         <div>
-          <h1 className="text-3xl font-bold font-display">My Courses</h1>
-          <p className="text-muted-foreground">Continue learning from where you left off</p>
+          <h1 className="text-2xl font-bold">My Learning</h1>
+          <p className="text-muted-foreground text-sm">
+            {stats.total} courses enrolled · {stats.completed} completed · {stats.inProgress} in progress
+          </p>
         </div>
 
-        {/* Summary stats */}
-        {counts.total > 0 && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        {/* Stats */}
+        {courses.length > 0 && (
+          <div className="grid grid-cols-3 gap-3">
             {[
-              { label: "Total",       value: counts.total,      color: "text-foreground" },
-              { label: "In Progress", value: counts.inProgress, color: "text-accent" },
-              { label: "Completed",   value: counts.completed,  color: "text-success" },
-              { label: "Not Started", value: counts.notStarted, color: "text-muted-foreground" },
-            ].map(({ label, value, color }) => (
-              <div key={label} className="border rounded-lg p-3 text-center">
-                <p className={`text-2xl font-bold ${color}`}>{value}</p>
-                <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+              { label: "Enrolled", value: stats.total, icon: <BookOpen className="h-4 w-4" /> },
+              { label: "In Progress", value: stats.inProgress, icon: <Clock className="h-4 w-4" /> },
+              { label: "Completed", value: stats.completed, icon: <Trophy className="h-4 w-4" /> },
+            ].map(({ label, value, icon }) => (
+              <div key={label} className="border rounded-lg p-4 text-center">
+                <div className="flex items-center justify-center gap-1.5 text-muted-foreground mb-1">
+                  {icon}
+                  <span className="text-xs">{label}</span>
+                </div>
+                <p className="text-2xl font-bold">{value}</p>
               </div>
             ))}
           </div>
         )}
 
-        {/* Filters */}
-        <div className="flex flex-col sm:flex-row gap-4">
+        {/* Search + Filter */}
+        <div className="flex flex-col sm:flex-row gap-3">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search your courses…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
+              className="pl-9"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-full sm:w-[180px]">
-              <Filter className="h-4 w-4 mr-2" />
-              <SelectValue placeholder="Filter by status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Courses</SelectItem>
-              <SelectItem value="in_progress">In Progress</SelectItem>
-              <SelectItem value="completed">Completed</SelectItem>
-              <SelectItem value="not_started">Not Started</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="w-full sm:w-[180px]">
-              <SelectValue placeholder="Sort by" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="recent">Recently Accessed</SelectItem>
-              <SelectItem value="title">Title A-Z</SelectItem>
-              <SelectItem value="progress">Progress</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {/* Course grid */}
-        {filtered.length > 0 ? (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filtered.map((course, index) => (
-              <motion.div
-                key={course.enrollmentId}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.05 }}
+          <div className="flex gap-2 flex-wrap">
+            {(["all", "in-progress", "completed", "not-started"] as const).map((f) => (
+              <Button
+                key={f}
+                size="sm"
+                variant={filter === f ? "default" : "outline"}
+                onClick={() => setFilter(f)}
+                className="capitalize"
               >
-                <Link to={`/course/${course.courseId}/progress`}>
-                  <div className="group border rounded-xl overflow-hidden hover:shadow-lg transition-all duration-300 h-full">
-                    {/* Thumbnail */}
-                    <div className="relative aspect-video bg-muted">
-                      {course.thumbnail ? (
-                        <img
-                          src={course.thumbnail}
-                          alt={course.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <BookOpen className="h-10 w-10 text-muted-foreground" />
-                        </div>
-                      )}
-                      <div className="absolute top-3 right-3">
-                        {getStatusBadge(course.status)}
-                      </div>
-                    </div>
-
-                    {/* Info */}
-                    <div className="p-4 space-y-3">
-                      <h3 className="font-semibold line-clamp-2 group-hover:text-accent transition-colors">
-                        {course.title}
-                      </h3>
-                      <p className="text-sm text-muted-foreground">{course.instructor}</p>
-
-                      {/* Progress */}
-                      <div className="space-y-2">
-                        <div className="flex justify-between text-sm">
-                          <span className="text-muted-foreground">
-                            {course.completedLessons}/{course.totalLessons} lessons
-                          </span>
-                          <span className="font-medium">{course.progress}%</span>
-                        </div>
-                        <Progress value={course.progress} className="h-2" />
-                      </div>
-
-                      {/* Footer */}
-                      <div className="flex justify-between items-center text-xs text-muted-foreground pt-2 border-t">
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {course.duration}
-                        </span>
-                        {course.lastAccessedAt ? (
-                          <span>Last: {new Date(course.lastAccessedAt).toLocaleDateString()}</span>
-                        ) : (
-                          <span>Enrolled {new Date(course.enrolledAt).toLocaleDateString()}</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                </Link>
-              </motion.div>
+                {f === "all" ? "All" : f === "in-progress" ? "In Progress" :
+                 f === "completed" ? "Completed" : "Not Started"}
+              </Button>
             ))}
           </div>
-        ) : (
-          <div className="text-center py-12">
-            <BookOpen className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            {courses.length === 0 ? (
-              <>
-                <h3 className="text-lg font-semibold mb-2">No courses yet</h3>
-                <p className="text-muted-foreground mb-4">
-                  Enrol in a course to start learning
-                </p>
-                <Link to="/courses"><Button>Browse Courses</Button></Link>
-              </>
-            ) : (
-              <>
-                <h3 className="text-lg font-semibold mb-2">No courses found</h3>
-                <p className="text-muted-foreground mb-4">
-                  Try adjusting your filters or search query
-                </p>
-                <Button variant="outline" onClick={() => { setSearchQuery(""); setStatusFilter("all"); }}>
-                  Clear Filters
-                </Button>
-              </>
+        </div>
+
+        {/* Course list */}
+        {filtered.length === 0 ? (
+          <div className="border border-dashed rounded-xl p-12 text-center">
+            <BookOpen className="h-12 w-12 mx-auto text-muted-foreground mb-3" />
+            <h3 className="font-semibold mb-1">
+              {courses.length === 0 ? "No courses yet" : "No courses match your search"}
+            </h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              {courses.length === 0
+                ? "Start learning by enrolling in a course."
+                : "Try a different search or filter."}
+            </p>
+            {courses.length === 0 && (
+              <Button onClick={() => navigate("/courses")}>Browse Courses</Button>
             )}
           </div>
+        ) : (
+          <div className="space-y-3">
+            {filtered.map((course) => (
+              <EnrolledCourseCard key={course.id ?? course.courseId} course={course} />
+            ))}
+          </div>
         )}
-
       </div>
     </DashboardLayout>
   );

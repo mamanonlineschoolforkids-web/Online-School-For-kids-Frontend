@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { userService, ProfileDto } from "@/services/userService";
+import { useAuthStore } from "@/stores/authStore";
 import { NotificationsTab } from "@/components/profile/NotificationsTab";
 import { BillingTab } from "@/components/profile/parent/BillingTab";
 import { ExperienceTab } from "@/components/profile/creator/ExperienceTab";
@@ -30,6 +31,7 @@ const COUNTRIES = ["Egypt", "Iraq", "Jordan", "Palestine", "Saudi Arabia", "Syri
 
 export default function SpecialistProfilePage() {
   const { toast } = useToast();
+  const { user: currentUser, setUser } = useAuthStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [userData, setUserData] = useState<ProfileDto | null>(null);
@@ -76,7 +78,7 @@ export default function SpecialistProfilePage() {
       const formData = new FormData(); formData.append("profilePicture", file);
       const res = await userService.uploadProfilePicture(formData);
       setUserData(prev => prev ? { ...prev, profilePictureUrl: res.profilePictureUrl } : null);
-      const u = JSON.parse(localStorage.getItem("user") || "{}"); u.profilePictureUrl = res.profilePictureUrl; localStorage.setItem("user", JSON.stringify(u));
+      if (currentUser) setUser({ ...currentUser, profilePictureUrl: res.profilePictureUrl });
       toast({ title: "Updated" });
     } catch (e: any) { toast({ title: "Error", description: e.response?.data?.message || "Failed", variant: "destructive" }); }
     finally { setIsUploadingImage(false); if (fileInputRef.current) fileInputRef.current.value = ""; }
@@ -90,7 +92,7 @@ export default function SpecialistProfilePage() {
       const payload = { fullName: `${profile.firstName} ${profile.lastName}`.trim(), phone: profile.phone, country: actualCountry, bio: profile.bio, professionalTitle: profile.professionalTitle, yearsOfExperience: parseInt(profile.yearsOfExperience) || 0, specializations: expertiseTags };
       await userService.updateProfile(payload);
       setUserData(prev => prev ? { ...prev, ...payload } : null);
-      const u = JSON.parse(localStorage.getItem("user") || "{}"); u.fullName = payload.fullName; localStorage.setItem("user", JSON.stringify(u));
+      if (currentUser) setUser({ ...currentUser, fullName: payload.fullName });
       setIsEditingProfile(false);
       toast({ title: "Saved", description: "Profile updated successfully." });
     } catch (e: any) { toast({ title: "Error", description: e.response?.data?.message || "Failed", variant: "destructive" }); }

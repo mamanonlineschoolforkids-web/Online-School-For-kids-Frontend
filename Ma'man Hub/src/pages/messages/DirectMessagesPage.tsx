@@ -8,7 +8,7 @@ import {
   useState, useEffect, useRef, useCallback,
   type KeyboardEvent,
 } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Send, Search, MoreVertical, Phone, Video, Check, CheckCheck,
@@ -20,8 +20,12 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { useChatStore } from "@/stores/chatStore";
 import { useAuthStore } from "@/stores/authStore";
@@ -448,6 +452,7 @@ function ConvItem({
 
 export default function DirectMessagesPage() {
   const { user, token } = useAuthStore();
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
     conversations, activeId, activeType,
@@ -468,6 +473,21 @@ export default function DirectMessagesPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [isStartingConv, setIsStartingConv] = useState(false);
+  const handledUserIdRef = useRef<string | null>(null);
+  const [deletingConvId, setDeletingConvId] = useState<string | null>(null);
+  const [isDeletingConv, setIsDeletingConv] = useState(false);
+
+  const handleDeleteConversation = async () => {
+    if (!deletingConvId) return;
+    setIsDeletingConv(true);
+    try {
+      await chatApi.deleteConversation(deletingConvId);
+      await loadConversations();
+    } finally {
+      setIsDeletingConv(false);
+      setDeletingConvId(null);
+    }
+  };
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef  = useRef<HTMLInputElement>(null);
@@ -486,20 +506,20 @@ export default function DirectMessagesPage() {
   // ── Deep-link: /messages?userId=xyz starts (or opens) a DM ──────────────────
   useEffect(() => {
     const targetUserId = searchParams.get("userId");
-    if (!targetUserId || !token || isStartingConv) return;
+    if (!targetUserId || !token) return;
+    if (handledUserIdRef.current === targetUserId) return; // already handled this deep-link
+    handledUserIdRef.current = targetUserId;
 
     (async () => {
       setIsStartingConv(true);
       try {
-        // If we already have a conversation with this person, just open it
-        const existing = conversations.find((c) => c.participantId === targetUserId);
-        if (existing) {
-          await setActive("dm", existing.id);
-        } else {
-          const conv = await chatApi.startConversation(targetUserId);
-          await loadConversations();
-          await setActive("dm", conv.id);
-        }
+        // Always defer to the backend's idempotent get-or-create — it returns
+        // the existing conversation (with full history) if one already exists,
+        // so there's no need to (and no risk in not) pre-checking a local list
+        // that may not have finished loading yet.
+        const conv = await chatApi.startConversation(targetUserId);
+        await loadConversations();
+        await setActive("dm", conv.id);
       } finally {
         setIsStartingConv(false);
         // Clear the query param so refreshing doesn't re-trigger this
@@ -507,7 +527,7 @@ export default function DirectMessagesPage() {
         setSearchParams(searchParams, { replace: true });
       }
     })();
-  }, [searchParams, token, conversations]);
+  }, [searchParams, token]);
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -722,15 +742,31 @@ export default function DirectMessagesPage() {
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <Button variant="ghost" size="icon" className="h-8 w-8">
+                <Button variant="ghost" size="icon" className="h-8 w-8" disabled title="Voice calling coming soon">
                   <Phone className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
+                <Button variant="ghost" size="icon" className="h-8 w-8" disabled title="Video calling coming soon">
                   <Video className="h-4 w-4" />
                 </Button>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
-                  <MoreVertical className="h-4 w-4" />
-                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => navigate(`/profile/${activeConv.participantId}`)}>
+                      View Profile
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="text-destructive focus:text-destructive"
+                      onClick={() => setDeletingConvId(activeConv.id)}
+                    >
+                      Delete Conversation
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
             </div>
 
@@ -897,6 +933,28 @@ export default function DirectMessagesPage() {
           </div>
         )}
       </div>
+
+      <AlertDialog open={!!deletingConvId} onOpenChange={(open) => !open && setDeletingConvId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete conversation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This deletes the conversation for both you and the other person, including all messages. This can't be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingConv}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={isDeletingConv}
+              onClick={handleDeleteConversation}
+            >
+              {isDeletingConv ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : null}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }

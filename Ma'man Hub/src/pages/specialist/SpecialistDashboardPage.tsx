@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -11,11 +11,10 @@ import {
   CheckCircle,
   XCircle,
   User,
-  MessageSquare,
+  Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
-import { useAuthStore } from "@/stores/authStore";
+import { appointmentService, AppointmentDto } from "@/services/appointmentService";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format, parseISO, isAfter } from "date-fns";
 import {
@@ -29,56 +28,70 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+// Backend status strings are PascalCase: "Pending" | "Confirmed" | "Cancelled" | "Completed"
 const statusColors: Record<string, string> = {
-  pending: "bg-yellow-100 text-yellow-800",
-  confirmed: "bg-green-100 text-green-800",
-  cancelled: "bg-red-100 text-red-800",
-  completed: "bg-blue-100 text-blue-800",
+  Pending: "bg-yellow-100 text-yellow-800",
+  Confirmed: "bg-green-100 text-green-800",
+  Cancelled: "bg-red-100 text-red-800",
+  Completed: "bg-blue-100 text-blue-800",
 };
+
+const QUERY_KEY = ["specialist-appointments-all"];
 
 export default function SpecialistDashboardPage() {
   const { toast } = useToast();
-  const { user } = useAuthStore();
   const queryClient = useQueryClient();
   const [cancelId, setCancelId] = useState<string | null>(null);
 
   const { data: appointments = [], isLoading } = useQuery({
-    queryKey: ["specialist-appointments-all", user?.id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("appointments")
-        .select("*")
-        .eq("specialist_id", user!.id)
-        .order("appointment_date", { ascending: true });
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!user,
+    queryKey: QUERY_KEY,
+    queryFn: appointmentService.getMySessionsAsSpecialist,
   });
 
-  const updateStatus = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: string }) => {
-      const { error } = await supabase
-        .from("appointments")
-        .update({ status })
-        .eq("id", id);
-      if (error) throw error;
+  const confirmMutation = useMutation({
+    mutationFn: (id: string) => appointmentService.confirmAppointment(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      toast({ title: "Appointment confirmed", description: "The session has been accepted." });
     },
-    onSuccess: (_, { status }) => {
-      queryClient.invalidateQueries({ queryKey: ["specialist-appointments-all"] });
-      toast({ title: `Appointment ${status}`, description: `The appointment has been ${status}.` });
+    onError: (err: any) => {
+      toast({
+        title: "Couldn't confirm",
+        description: err?.response?.data?.message,
+        variant: "destructive",
+      });
     },
   });
 
-  const pending = appointments.filter((a) => a.status === "pending");
+  const cancelMutation = useMutation({
+    mutationFn: (id: string) => appointmentService.cancelAppointment(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: QUERY_KEY });
+      toast({ title: "Appointment cancelled", description: "The appointment has been cancelled." });
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Couldn't cancel",
+        description: err?.response?.data?.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const pending = appointments.filter((a) => a.status === "Pending");
   const upcoming = appointments.filter(
-    (a) => (a.status === "confirmed" || a.status === "pending") && isAfter(parseISO(a.appointment_date), new Date(new Date().setDate(new Date().getDate() - 1)))
+    (a) =>
+      (a.status === "Confirmed" || a.status === "Pending") &&
+      isAfter(parseISO(a.appointmentDate), new Date(new Date().setDate(new Date().getDate() - 1)))
   );
   const past = appointments.filter(
-    (a) => !isAfter(parseISO(a.appointment_date), new Date(new Date().setDate(new Date().getDate() - 1))) || a.status === "completed" || a.status === "cancelled"
+    (a) =>
+      !isAfter(parseISO(a.appointmentDate), new Date(new Date().setDate(new Date().getDate() - 1))) ||
+      a.status === "Completed" ||
+      a.status === "Cancelled"
   );
 
-  const AppointmentCard = ({ appointment }: { appointment: any }) => (
+  const AppointmentCard = ({ appointment }: { appointment: AppointmentDto }) => (
     <div className="flex items-center justify-between rounded-lg border p-4">
       <div className="flex items-center gap-4">
         <Avatar className="h-10 w-10">
@@ -88,14 +101,15 @@ export default function SpecialistDashboardPage() {
         </Avatar>
         <div>
           <h4 className="font-medium">{appointment.title}</h4>
+          <p className="text-xs text-muted-foreground">{appointment.studentName}</p>
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
             <span className="flex items-center gap-1">
               <CalendarDays className="h-3.5 w-3.5" />
-              {format(parseISO(appointment.appointment_date), "MMM d, yyyy")}
+              {format(parseISO(appointment.appointmentDate), "MMM d, yyyy")}
             </span>
             <span className="flex items-center gap-1">
               <Clock className="h-3.5 w-3.5" />
-              {appointment.start_time.substring(0, 5)} - {appointment.end_time.substring(0, 5)}
+              {appointment.startTime} - {appointment.endTime}
             </span>
           </div>
           {appointment.description && (
@@ -107,13 +121,14 @@ export default function SpecialistDashboardPage() {
         <Badge className={statusColors[appointment.status] || "bg-muted"}>
           {appointment.status}
         </Badge>
-        {appointment.status === "pending" && (
+        {appointment.status === "Pending" && (
           <>
             <Button
               size="sm"
               variant="outline"
               className="text-green-600 border-green-200 hover:bg-green-50"
-              onClick={() => updateStatus.mutate({ id: appointment.id, status: "confirmed" })}
+              disabled={confirmMutation.isPending}
+              onClick={() => confirmMutation.mutate(appointment.id)}
             >
               <CheckCircle className="h-4 w-4 mr-1" /> Accept
             </Button>
@@ -127,11 +142,12 @@ export default function SpecialistDashboardPage() {
             </Button>
           </>
         )}
-        {appointment.status === "confirmed" && (
+        {appointment.status === "Confirmed" && (
           <Button
             size="sm"
             variant="outline"
             className="text-red-600 border-red-200 hover:bg-red-50"
+            disabled={!appointment.canCancel}
             onClick={() => setCancelId(appointment.id)}
           >
             Cancel
@@ -140,6 +156,17 @@ export default function SpecialistDashboardPage() {
       </div>
     </div>
   );
+
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <p>Loading your sessions…</p>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout>
@@ -251,7 +278,7 @@ export default function SpecialistDashboardPage() {
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {
-                if (cancelId) updateStatus.mutate({ id: cancelId, status: "cancelled" });
+                if (cancelId) cancelMutation.mutate(cancelId);
                 setCancelId(null);
               }}
             >

@@ -25,6 +25,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import QRCode from "react-qr-code";
 import { userService, ProfileDto } from "@/services/userService";
+import { useAuthStore } from "@/stores/authStore";
 import { authService } from "@/services/authService";
 import {
   adminService,
@@ -107,6 +108,7 @@ function generatePassword(): string {
 
 export default function AdminProfilePage() {
   const { toast } = useToast();
+  const { user: currentUser, setUser } = useAuthStore();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [userData, setUserData] = useState<ProfileDto | null>(null);
@@ -220,9 +222,7 @@ export default function AdminProfilePage() {
       formData.append("profilePicture", file);
       const res = await userService.uploadProfilePicture(formData);
       setUserData(prev => prev ? { ...prev, profilePictureUrl: res.profilePictureUrl } : null);
-      const u = JSON.parse(localStorage.getItem("user") || "{}");
-      u.profilePictureUrl = res.profilePictureUrl;
-      localStorage.setItem("user", JSON.stringify(u));
+      if (currentUser) setUser({ ...currentUser, profilePictureUrl: res.profilePictureUrl });
       toast({ title: "Updated", description: "Profile picture updated." });
     } catch (e: any) {
       toast({ title: "Error", description: e.response?.data?.message || "Failed to upload", variant: "destructive" });
@@ -237,9 +237,7 @@ export default function AdminProfilePage() {
       setIsSaving(true);
       const updated = await userService.updateProfile({ fullName: `${profile.firstName} ${profile.lastName}`.trim(), phone: profile.phone });
       setUserData(prev => prev ? { ...prev, fullName: updated.fullName, phone: updated.phone } : null);
-      const u = JSON.parse(localStorage.getItem("user") || "{}");
-      u.fullName = updated.fullName;
-      localStorage.setItem("user", JSON.stringify(u));
+      if (currentUser) setUser({ ...currentUser, fullName: updated.fullName });
       setIsEditing(false);
       toast({ title: "Profile Updated", description: "Your admin profile has been saved." });
     } catch (e: any) {

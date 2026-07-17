@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { authService } from "@/services/authService";
+import { useAuthStore } from "@/stores/authStore";
 import { cn } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -228,6 +229,7 @@ export default function CompleteProfilePage() {
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { setUser, setToken } = useAuthStore();
 
   const tempToken = searchParams.get("temp_token");
 
@@ -312,7 +314,8 @@ export default function CompleteProfilePage() {
         portfolioUrl: data.portfolioUrl,
       });
 
-      localStorage.setItem("user", JSON.stringify(authData.user));
+      setToken(authData.accessToken);
+      setUser(authData.user);
 
       const rolePathMap: Record<string, string> = {
         Student: "student",

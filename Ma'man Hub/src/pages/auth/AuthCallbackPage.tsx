@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { authService } from "@/services/authService";
+import { useAuthStore } from "@/stores/authStore";
 
 
 // Mirrors rolePathMap in LoginPage.tsx exactly
@@ -23,6 +24,7 @@ export default function AuthCallbackPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { setUser, setToken } = useAuthStore();
 
   useEffect(() => {
     const accessToken  = searchParams.get("access_token");
@@ -49,13 +51,13 @@ export default function AuthCallbackPage() {
     }
 
     // ── Persist tokens ───────────────────────────────────────────────────────
-    localStorage.setItem("access_token", accessToken);
+    setToken(accessToken);
     localStorage.setItem("refresh_token", refreshToken);
 
     // ── Fetch user to get role + isFirstLogin ────────────────────────────────
     authService.getCurrentUser()
       .then((userData) => {
-        localStorage.setItem("user", JSON.stringify(userData));
+        setUser(userData);
 
         const rolePath = rolePathMap[userData.role] ?? "student";
 

@@ -8,10 +8,13 @@ import {
   AlertCircle,
   ArrowUpRight,
   ArrowDownRight,
+  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
+import { useQuery } from "@tanstack/react-query";
+import { adminService } from "@/services/adminService";
 import {
   LineChart,
   Line,
@@ -25,147 +28,88 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  Legend,
 } from "recharts";
 
-// Mock stats
-const stats = [
-  {
-    title: "Total Users",
-    value: "12,458",
-    change: "+12%",
-    trend: "up",
-    icon: Users,
-    color: "text-accent",
-    bgColor: "bg-accent/10",
-  },
-  {
-    title: "Active Users",
-    value: "8,234",
-    change: "+8%",
-    trend: "up",
-    icon: TrendingUp,
-    color: "text-success",
-    bgColor: "bg-success/10",
-  },
-  {
-    title: "Total Revenue",
-    value: "$284,590",
-    change: "+23%",
-    trend: "up",
-    icon: DollarSign,
-    color: "text-amber-500",
-    bgColor: "bg-amber-500/10",
-  },
-  {
-    title: "Total Courses",
-    value: "342",
-    change: "+5",
-    trend: "up",
-    icon: BookOpen,
-    color: "text-violet-500",
-    bgColor: "bg-violet-500/10",
-  },
+const ROLE_COLORS = [
+  "hsl(var(--accent))",
+  "hsl(var(--success))",
+  "hsl(220, 80%, 60%)",
+  "hsl(280, 70%, 60%)",
+  "hsl(30, 90%, 60%)",
 ];
 
-// Mock chart data
-const userRegistrations = [
-  { month: "Jan", users: 400 },
-  { month: "Feb", users: 520 },
-  { month: "Mar", users: 680 },
-  { month: "Apr", users: 890 },
-  { month: "May", users: 1100 },
-  { month: "Jun", users: 1350 },
-  { month: "Jul", users: 1580 },
-];
-
-const revenueData = [
-  { month: "Jan", revenue: 12400 },
-  { month: "Feb", revenue: 18500 },
-  { month: "Mar", revenue: 22300 },
-  { month: "Apr", revenue: 28900 },
-  { month: "May", revenue: 35600 },
-  { month: "Jun", revenue: 42100 },
-  { month: "Jul", revenue: 48200 },
-];
-
-const enrollmentData = [
-  { name: "Web Dev", enrollments: 2340 },
-  { name: "Data Science", enrollments: 1890 },
-  { name: "Design", enrollments: 1560 },
-  { name: "Marketing", enrollments: 980 },
-  { name: "Business", enrollments: 720 },
-];
-
-const roleDistribution = [
-  { name: "Students", value: 8500, color: "hsl(var(--accent))" },
-  { name: "Parents", value: 2100, color: "hsl(var(--success))" },
-  { name: "Creators", value: 1200, color: "hsl(220, 80%, 60%)" },
-  { name: "Specialists", value: 658, color: "hsl(280, 70%, 60%)" },
-];
-
-// Mock recent transactions
-const recentTransactions = [
-  {
-    id: "1",
-    user: "John Smith",
-    course: "React Masterclass",
-    amount: 89.99,
-    date: "2024-01-25",
-    status: "completed",
-  },
-  {
-    id: "2",
-    user: "Sarah Chen",
-    course: "Python Bootcamp",
-    amount: 129.99,
-    date: "2024-01-25",
-    status: "completed",
-  },
-  {
-    id: "3",
-    user: "Mike Wilson",
-    course: "UI/UX Design",
-    amount: 79.99,
-    date: "2024-01-24",
-    status: "pending",
-  },
-  {
-    id: "4",
-    user: "Emma Brown",
-    course: "Data Science A-Z",
-    amount: 149.99,
-    date: "2024-01-24",
-    status: "completed",
-  },
-];
-
-// Mock recent users
-const recentUsers = [
-  {
-    id: "1",
-    name: "Alice Johnson",
-    email: "alice@example.com",
-    role: "Student",
-    date: "2024-01-25",
-  },
-  {
-    id: "2",
-    name: "Bob Williams",
-    email: "bob@example.com",
-    role: "Creator",
-    date: "2024-01-25",
-  },
-  {
-    id: "3",
-    name: "Carol Davis",
-    email: "carol@example.com",
-    role: "Parent",
-    date: "2024-01-24",
-  },
-];
+function formatChange(percent: number) {
+  const sign = percent > 0 ? "+" : "";
+  return `${sign}${percent}%`;
+}
 
 export default function AdminDashboardPage() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["admin-dashboard-stats"],
+    queryFn: adminService.getDashboardStats,
+  });
+
+  if (isLoading) {
+    return (
+      <DashboardLayout>
+        <div className="flex items-center justify-center py-24 gap-3 text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin text-primary" />
+          <p>Loading dashboard…</p>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <DashboardLayout>
+        <div className="flex flex-col items-center justify-center py-24 gap-3 text-muted-foreground">
+          <AlertCircle className="h-8 w-8 text-destructive" />
+          <p>Couldn't load dashboard stats. Please try again.</p>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  const stats = [
+    {
+      title: "Total Users",
+      value: data.totalUsers.toLocaleString(),
+      change: formatChange(data.totalUsersChangePercent),
+      trend: data.totalUsersChangePercent >= 0 ? "up" : "down",
+      icon: Users,
+      color: "text-accent",
+      bgColor: "bg-accent/10",
+    },
+    {
+      title: "Active Users",
+      value: data.activeUsers.toLocaleString(),
+      change: formatChange(data.activeUsersChangePercent),
+      trend: data.activeUsersChangePercent >= 0 ? "up" : "down",
+      icon: TrendingUp,
+      color: "text-success",
+      bgColor: "bg-success/10",
+    },
+    {
+      title: "Total Revenue",
+      value: `$${data.totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 0 })}`,
+      change: formatChange(data.totalRevenueChangePercent),
+      trend: data.totalRevenueChangePercent >= 0 ? "up" : "down",
+      icon: DollarSign,
+      color: "text-amber-500",
+      bgColor: "bg-amber-500/10",
+    },
+    {
+      title: "Total Courses",
+      value: data.totalCourses.toLocaleString(),
+      change: formatChange(data.totalCoursesChangePercent),
+      trend: data.totalCoursesChangePercent >= 0 ? "up" : "down",
+      icon: BookOpen,
+      color: "text-violet-500",
+      bgColor: "bg-violet-500/10",
+    },
+  ];
+
   return (
     <DashboardLayout>
       <div className="space-y-6">
@@ -179,7 +123,8 @@ export default function AdminDashboardPage() {
           <div className="flex items-center gap-2">
             <Button variant="outline" asChild>
               <Link to="/admin/moderation">
-                <AlertCircle className="h-4 w-4 mr-2" />5 Pending Reviews
+                <AlertCircle className="h-4 w-4 mr-2" />
+                {data.pendingReviews} Pending Review{data.pendingReviews === 1 ? "" : "s"}
               </Link>
             </Button>
           </div>
@@ -232,7 +177,7 @@ export default function AdminDashboardPage() {
             <CardContent>
               <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={userRegistrations}>
+                  <LineChart data={data.userRegistrations}>
                     <CartesianGrid
                       strokeDasharray="3 3"
                       className="stroke-muted"
@@ -248,7 +193,8 @@ export default function AdminDashboardPage() {
                     />
                     <Line
                       type="monotone"
-                      dataKey="users"
+                      dataKey="value"
+                      name="Users"
                       stroke="hsl(var(--accent))"
                       strokeWidth={2}
                       dot={{ fill: "hsl(var(--accent))" }}
@@ -266,7 +212,7 @@ export default function AdminDashboardPage() {
             <CardContent>
               <div className="h-[300px]">
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={revenueData}>
+                  <LineChart data={data.revenue}>
                     <CartesianGrid
                       strokeDasharray="3 3"
                       className="stroke-muted"
@@ -309,28 +255,34 @@ export default function AdminDashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="h-[300px]">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={enrollmentData}>
-                    <CartesianGrid
-                      strokeDasharray="3 3"
-                      className="stroke-muted"
-                    />
-                    <XAxis dataKey="name" className="text-xs" />
-                    <YAxis className="text-xs" />
-                    <Tooltip
-                      contentStyle={{
-                        backgroundColor: "hsl(var(--background))",
-                        border: "1px solid hsl(var(--border))",
-                        borderRadius: "8px",
-                      }}
-                    />
-                    <Bar
-                      dataKey="enrollments"
-                      fill="hsl(var(--accent))"
-                      radius={[4, 4, 0, 0]}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
+                {data.enrollmentsByCategory.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-sm text-muted-foreground">
+                    No enrollments yet.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={data.enrollmentsByCategory}>
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        className="stroke-muted"
+                      />
+                      <XAxis dataKey="name" className="text-xs" />
+                      <YAxis className="text-xs" />
+                      <Tooltip
+                        contentStyle={{
+                          backgroundColor: "hsl(var(--background))",
+                          border: "1px solid hsl(var(--border))",
+                          borderRadius: "8px",
+                        }}
+                      />
+                      <Bar
+                        dataKey="enrollments"
+                        fill="hsl(var(--accent))"
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -344,7 +296,7 @@ export default function AdminDashboardPage() {
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie
-                      data={roleDistribution}
+                      data={data.roleDistribution}
                       cx="50%"
                       cy="50%"
                       innerRadius={60}
@@ -355,8 +307,8 @@ export default function AdminDashboardPage() {
                         `${name} ${(percent * 100).toFixed(0)}%`
                       }
                     >
-                      {roleDistribution.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={entry.color} />
+                      {data.roleDistribution.map((entry, index) => (
+                        <Cell key={entry.name} fill={ROLE_COLORS[index % ROLE_COLORS.length]} />
                       ))}
                     </Pie>
                     <Tooltip
@@ -385,27 +337,31 @@ export default function AdminDashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {recentTransactions.map((tx) => (
-                  <div
-                    key={tx.id}
-                    className="flex items-center justify-between"
-                  >
-                    <div>
-                      <p className="font-medium">{tx.user}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {tx.course}
-                      </p>
+                {data.recentTransactions.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No transactions yet.</p>
+                ) : (
+                  data.recentTransactions.map((tx) => (
+                    <div
+                      key={tx.id}
+                      className="flex items-center justify-between"
+                    >
+                      <div>
+                        <p className="font-medium">{tx.userName}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {tx.courseName}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-semibold">${tx.amount.toFixed(2)}</p>
+                        <p
+                          className={`text-xs ${tx.status === "completed" ? "text-success" : "text-amber-500"}`}
+                        >
+                          {tx.status}
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="font-semibold">${tx.amount}</p>
-                      <p
-                        className={`text-xs ${tx.status === "completed" ? "text-success" : "text-amber-500"}`}
-                      >
-                        {tx.status}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
@@ -420,25 +376,29 @@ export default function AdminDashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                {recentUsers.map((user) => (
-                  <div
-                    key={user.id}
-                    className="flex items-center justify-between"
-                  >
-                    <div>
-                      <p className="font-medium">{user.name}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {user.email}
-                      </p>
+                {data.recentRegistrations.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No registrations yet.</p>
+                ) : (
+                  data.recentRegistrations.map((user) => (
+                    <div
+                      key={user.id}
+                      className="flex items-center justify-between"
+                    >
+                      <div>
+                        <p className="font-medium">{user.name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          {user.email}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm font-medium">{user.role}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(user.date).toLocaleDateString()}
+                        </p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p className="text-sm font-medium">{user.role}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {user.date}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </div>
             </CardContent>
           </Card>
