@@ -21,6 +21,7 @@ import PublicProfilePage from "./pages/auth/PublicProfilePage.tsx";
 
 import LeaderboardPage from "./pages/LeaderboardPage.tsx";
 import FeedPage from "./pages/FeedPage.tsx";
+import MyFeedsPage from "./pages/MyFeedsPage.tsx"
 
 // Course Pages
 import CartPage from "./pages/courses/CartPage";
@@ -28,12 +29,14 @@ import Categoriespage from "./pages/courses/Categoriespage";
 import CheckoutPage from "./pages/courses/CheckoutPage";
 import CourseDetailPage from "./pages/courses/CourseDetailPage";
 import CoursePlayerPage from "./pages/courses/CoursePlayerPage";
+import CourseCompletionPage from "./pages/courses/CourseCompletionPage";
 import CourseProgressPage from "./pages/courses/CourseProgressPage";
 import CoursesCatalogPage from "./pages/courses/CoursesCatalogPage";
 import MyCoursesPage from "./pages/courses/MyCoursesPage";
 import OrderConfirmationPage from "./pages/courses/OrderConfirmationPage";
 import QuizPage from "./pages/courses/QuizPage";
 import WishlistPage from "./pages/courses/Wishlistpage.tsx";
+
 
 // Admin
 import AdminProfilePage from "./pages/admin/AdminProfilePage";
@@ -51,7 +54,7 @@ import LiveSessionPage from "./pages/creator/LiveSessionPage";
 import CreatorMyCoursesPage from "@/pages/creator/MyCoursesPage";
 import CourseDetailManagementPage from "@/pages/creator/CourseDetailManagementPage";
 import CreateCoursePage from "@/pages/creator/CreateCoursePage";
-
+import ContentCreatorListingPage from "@/pages/creator/ContentCreatorListingPage"
 // ── Lesson creation & editing ────────────────────────────────────────────────
 import LessonEditorPage from "@/pages/creator/LessonEditorPage";
 import ChunkReviewPage from "@/pages/creator/ChunkReviewPage";
@@ -61,9 +64,11 @@ import CoursePreviewPage from "@/pages/creator/CoursePreviewPage";
 // Messages Pages
 import MessagesPage from "./pages/messages/DirectMessagesPage.tsx";
 import GroupChatPage from "./pages/messages/GroupChatPage";
+import JoinGroupPage from "./pages/messages/JoinGroupPage";
 
 // Parent
 import ParentDashboardPage from "./pages/parent/ParentDashboardPage";
+import ChildrenManagementPage from "./pages/parent/ChildrenManagementPage";
 import ParentProfilePage from "./pages/parent/ParentProfilePage";
 
 // Specialist
@@ -79,7 +84,7 @@ import SpecialistSessionsPage from "./pages/specialist/SpecialistSessionsPage";
 import StudentProfilePage from "./pages/student/StudentProfilePage";
 import StudentDashboardPage from "./pages/student/StudentDashboardPage";
 import AcceptInvitePage from "./pages/student/AcceptInvitePage";
-
+import CalendarPage from "./pages/CalendarPage";
 const queryClient = new QueryClient();
 
 const ADMIN          = ["Admin"] as const;
@@ -120,6 +125,8 @@ const App = () => (
           <Route path="/profile/:userId"      element={<PublicProfilePage />} />
           <Route path="/leaderboard"          element={<LeaderboardPage />} />
           <Route path="/feeds"                element={<FeedPage />} />
+          <Route path="/my-feeds"             element={<MyFeedsPage />} />
+
 
           {/* ── Courses (student-facing) ── */}
           <Route path="/cart"       element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<CartPage />} />} />
@@ -128,6 +135,7 @@ const App = () => (
           <Route path="/checkout"   element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<CheckoutPage />} />} />
           <Route path="/courses/:courseId" element={<CourseDetailPage />} />
           <Route path="/course/:courseId/learn"    element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<CoursePlayerPage />} />} />
+          <Route path="/course/:courseId/complete" element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<CourseCompletionPage />} />} />
           <Route path="/course/:courseId/progress" element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<CourseProgressPage />} />} />
 
           <Route
@@ -147,7 +155,7 @@ const App = () => (
           <Route path="/ContentCreator/go-live"   element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<GoLivePage />} />} />
           <Route path="/live/:sessionId"           element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<LiveSessionPage />} />} />
 
-          <Route path="/creator/my-courses"   element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<CreatorMyCoursesPage />} />} />
+          <Route path="/ContentCreator/my-courses"   element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<CreatorMyCoursesPage />} />} />
           <Route path="/creator/courses/new"  element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<CreateCoursePage />} />} />
 
           <Route
@@ -175,12 +183,19 @@ const App = () => (
             element={<ProtectedRoute allowedRoles={[...CREATOR]} element={<CoursePreviewPage />} />}
           />
 
+          <Route
+            path="/instructors"
+           element={<ContentCreatorListingPage />} 
+          />
+
           {/* ── Messages ── */}
           <Route path="/messages" element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<MessagesPage />} />} />
           <Route path="/groups"   element={<ProtectedRoute allowedRoles={[...ALL_AUTHENTICATED]} element={<GroupChatPage />} />} />
+          <Route path="/join/:code" element={<JoinGroupPage />} />
 
           {/* ── Parent ── */}
           <Route path="/parent/dashboard" element={<ProtectedRoute allowedRoles={[...PARENT]} element={<ParentDashboardPage />} />} />
+          <Route path="/parent/children" element={<ProtectedRoute allowedRoles={[...PARENT]} element={<ChildrenManagementPage />} />} />
           <Route path="/parent/profile"   element={<ProtectedRoute allowedRoles={[...PARENT]} element={<ParentProfilePage />} />} />
 
           {/* ── Specialist ── */}
@@ -196,7 +211,14 @@ const App = () => (
           <Route path="/student/accept-invite" element={<ProtectedRoute allowedRoles={[...STUDENT_FAMILY]} element={<AcceptInvitePage />} />} />
           <Route path="/student/dashboard"     element={<ProtectedRoute allowedRoles={[...STUDENT_FAMILY]} element={<StudentDashboardPage />} />} />
           <Route path="/student/profile"       element={<ProtectedRoute allowedRoles={[...STUDENT_FAMILY]} element={<StudentProfilePage />} />} />
+    <Route
+      path="/student/my-courses"
+       element={<MyCoursesPage />}
+    />
 
+    <Route
+      path="/calendar"
+       element={<CalendarPage />} />
           <Route path="/unauthorized" element={<UnauthorizedPage />} />
           <Route path="*"             element={<NotFound />} />
         </Routes>

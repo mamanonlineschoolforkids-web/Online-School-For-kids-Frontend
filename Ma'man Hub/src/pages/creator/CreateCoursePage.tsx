@@ -351,7 +351,7 @@ export default function CreateCoursePage() {
         variant="ghost"
         size="sm"
         className="-ml-2"
-        onClick={() => navigate("/creator/my-courses")}
+        onClick={() => navigate("/ContentCreator/my-courses")}
       >
         <ArrowLeft className="h-4 w-4 mr-2" />
         My Courses

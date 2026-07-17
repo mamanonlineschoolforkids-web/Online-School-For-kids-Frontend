@@ -103,7 +103,7 @@ function SectionDialog({
 
 // ── Dialog: Choose how to add a lesson (4 options) ────────────────────────────
 
-type AddLessonStep = "choose" | "youtube-link";
+type AddLessonStep = "choose" | "youtube-link" | "processing";
 type AddLessonOption = "chunked-upload" | "chunked-youtube" | "single-upload" | "single-youtube";
 
 function AddLessonDialog({
@@ -123,6 +123,14 @@ function AddLessonDialog({
   const [pendingOption, setPendingOption] = useState<AddLessonOption | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState("");
   const [starting, setStarting] = useState(false);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!starting) return;
+    setElapsedSeconds(0);
+    const interval = setInterval(() => setElapsedSeconds((s) => s + 1), 1000);
+    return () => clearInterval(interval);
+  }, [starting]);
 
   const reset = () => {
     setStep("choose");
@@ -130,13 +138,18 @@ function AddLessonDialog({
     setYoutubeUrl("");
   };
 
-  const handleClose = () => { reset(); onClose(); };
+  const handleClose = () => {
+    if (starting) return; // don't allow closing mid-processing
+    reset();
+    onClose();
+  };
 
   const isValidYoutubeUrl = (url: string) =>
     /^(https?:\/\/)?(www\.)?(youtube\.com\/watch\?v=|youtu\.be\/)[\w-]{11}/.test(url);
 
   const handleFilePicked = async (option: "chunked-upload" | "single-upload", file: File) => {
     setStarting(true);
+    setStep("processing");
     try {
       if (option === "chunked-upload") {
         const jobId = await videoProcessingService.startChunkedFromUpload(courseId, sectionId, file);
@@ -145,13 +158,15 @@ function AddLessonDialog({
         const jobId = await videoProcessingService.startSingleFromUpload(courseId, sectionId, file);
         navigate(`/creator/courses/${courseId}/single-lesson-review/${jobId}`);
       }
-      handleClose();
+      reset();
+      onClose();
     } catch (err: any) {
       toast({
         title: "Processing failed",
         description: err?.response?.data?.message,
         variant: "destructive",
       });
+      setStep("choose");
     } finally {
       setStarting(false);
     }
@@ -163,6 +178,7 @@ function AddLessonDialog({
       return;
     }
     setStarting(true);
+    setStep("processing");
     try {
       if (pendingOption === "chunked-youtube") {
         const jobId = await videoProcessingService.startChunkedFromYoutube(courseId, sectionId, youtubeUrl);
@@ -171,13 +187,15 @@ function AddLessonDialog({
         const jobId = await videoProcessingService.startSingleFromYoutube(courseId, sectionId, youtubeUrl);
         navigate(`/creator/courses/${courseId}/single-lesson-review/${jobId}`);
       }
-      handleClose();
+      reset();
+      onClose();
     } catch (err: any) {
       toast({
         title: "Processing failed",
         description: err?.response?.data?.message,
         variant: "destructive",
       });
+      setStep("choose");
     } finally {
       setStarting(false);
     }
@@ -188,7 +206,9 @@ function AddLessonDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            {step === "choose" ? "Add Lesson Content" : "Paste YouTube Link"}
+            {step === "choose" && "Add Lesson Content"}
+            {step === "youtube-link" && "Paste YouTube Link"}
+            {step === "processing" && "Processing"}
           </DialogTitle>
         </DialogHeader>
 
@@ -266,6 +286,21 @@ function AddLessonDialog({
                 Continue
               </Button>
             </DialogFooter>
+          </div>
+        )}
+
+        {step === "processing" && (
+          <div className="flex flex-col items-center justify-center gap-4 py-10 text-center">
+            <Loader2 className="h-10 w-10 animate-spin text-primary" />
+            <div>
+              <p className="font-semibold">Processing your video…</p>
+              <p className="text-sm text-muted-foreground mt-1 max-w-xs">
+                Transcribing{pendingOption?.startsWith("chunked") ? " and splitting into lessons" : ""} — this can take a few minutes depending on video length. Don't close this window.
+              </p>
+            </div>
+            <p className="text-2xl font-mono font-semibold text-primary tabular-nums">
+              {formatDuration(elapsedSeconds)}
+            </p>
           </div>
         )}
       </DialogContent>

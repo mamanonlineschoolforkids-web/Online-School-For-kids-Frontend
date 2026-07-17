@@ -2,7 +2,7 @@
 // Step 1 of 2 — pick a date/time and reserve the slot (status = Pending).
 // The user is then redirected to ConfirmBookingPage to pay.
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { DashboardLayout } from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -50,7 +50,7 @@ export default function BookSessionPage() {
   });
 
   // Already-booked slots for the selected date
-  const { data: bookedSlots = [], isFetching: loadingSlots } = useQuery({
+  const { data: bookedSlots = [], isFetching: loadingSlots, refetch: refetchBookedSlots } = useQuery({
     queryKey: ["booked-slots", specialistId, selectedDate],
     queryFn: () =>
       appointmentService.getBookedSlots(
@@ -62,21 +62,57 @@ export default function BookSessionPage() {
     refetchInterval: 30_000,
   });
 
+  // Ticks every second so "Reserved" slot countdowns stay live, and lets us
+  // immediately re-check availability the moment a hold's countdown hits 0:00
+  // instead of waiting for the next 30s poll.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const bookedSlotsByTime = useMemo(() => {
+    const map = new Map<string, (typeof bookedSlots)[number]>();
+    bookedSlots.forEach((b) => map.set(b.time, b));
+    return map;
+  }, [bookedSlots]);
+
+  // The moment any reserved slot's hold expires, re-check with the server —
+  // it may have just become bookable again.
+  useEffect(() => {
+    const anyJustExpired = bookedSlots.some(
+      (b) => b.status === "Reserved" && b.holdExpiresAtUtc &&
+        new Date(b.holdExpiresAtUtc).getTime() <= now &&
+        new Date(b.holdExpiresAtUtc).getTime() > now - 1000
+    );
+    if (anyJustExpired) refetchBookedSlots();
+  }, [now, bookedSlots, refetchBookedSlots]);
+
   const availability = specialist?.availabilitySlots ?? [];
 
-  const availableSlots = useMemo(() => {
+  const daySlots = useMemo(() => {
     if (!selectedDate) return [];
     const dayName = format(selectedDate, "EEEE");
-    const daySlots = availability.filter((a: any) => a.day === dayName);
-    if (daySlots.length === 0) return [];
+    const windows = availability.filter((a: any) => a.day === dayName);
+    if (windows.length === 0) return [];
 
-    return ALL_HALF_HOUR_SLOTS.filter((slot) => {
-      if (bookedSlots.includes(slot)) return false;
-      return daySlots.some(
-        (a: any) => slot >= a.startTime && slot < a.endTime
-      );
+    return ALL_HALF_HOUR_SLOTS.filter((slot) =>
+      windows.some((a: any) => slot >= a.startTime && slot < a.endTime)
+    ).map((slot) => {
+      const booked = bookedSlotsByTime.get(slot);
+      const secondsRemaining = booked?.holdExpiresAtUtc
+        ? Math.max(0, Math.floor((new Date(booked.holdExpiresAtUtc).getTime() - now) / 1000))
+        : 0;
+      return {
+        time: slot,
+        state: !booked ? "available" as const
+          : booked.status === "Reserved" && secondsRemaining > 0 ? "reserved" as const
+          : booked.status === "Reserved" ? "available" as const // hold just expired, treat as free until refetch confirms
+          : "booked" as const,
+        secondsRemaining,
+      };
     });
-  }, [selectedDate, availability, bookedSlots]);
+  }, [selectedDate, availability, bookedSlotsByTime, now]);
 
   const endTime = useMemo(() => {
     if (!selectedSlot) return "";
@@ -239,23 +275,50 @@ export default function BookSessionPage() {
                       <Skeleton key={i} className="h-9 w-full rounded-md" />
                     ))}
                   </div>
-                ) : availableSlots.length === 0 ? (
+                ) : daySlots.length === 0 ? (
                   <div className="flex items-center gap-2 text-sm text-muted-foreground">
                     <AlertCircle className="h-4 w-4 shrink-0" />
                     No available slots on this day. Try another date.
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 gap-2">
-                    {availableSlots.map((slot) => (
-                      <Button
-                        key={slot}
-                        variant={selectedSlot === slot ? "default" : "outline"}
-                        size="sm"
-                        onClick={() => setSelectedSlot(slot)}
-                      >
-                        {slot}
-                      </Button>
-                    ))}
+                  <div className="grid grid-cols-2 gap-2">
+                    {daySlots.map(({ time, state, secondsRemaining }) => {
+                      if (state === "available") {
+                        return (
+                          <Button
+                            key={time}
+                            variant={selectedSlot === time ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => setSelectedSlot(time)}
+                          >
+                            {time}
+                          </Button>
+                        );
+                      }
+                      if (state === "reserved") {
+                        const mm = String(Math.floor(secondsRemaining / 60)).padStart(2, "0");
+                        const ss = String(secondsRemaining % 60).padStart(2, "0");
+                        return (
+                          <div
+                            key={time}
+                            className="flex flex-col items-center justify-center gap-0.5 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-amber-800 cursor-not-allowed"
+                            title="Someone else has this slot on hold — it may free up if they don't complete payment in time."
+                          >
+                            <span className="text-sm font-medium">{time}</span>
+                            <span className="text-[10px] font-medium uppercase tracking-wide">Reserved</span>
+                            <span className="text-[10px] tabular-nums">frees in {mm}:{ss}</span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div
+                          key={time}
+                          className="flex items-center justify-center rounded-md border bg-muted px-2 py-1.5 text-sm text-muted-foreground cursor-not-allowed"
+                        >
+                          {time} · Booked
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>

@@ -30,8 +30,7 @@ interface DashboardLayoutProps {
 
 const studentNavigation = [
   { name: "Dashboard",    href: "/student/dashboard",    icon: Home },
-  { name: "My Courses",   href: "/student/my-courses",   icon: BookOpen },
-  { name: "Achievements", href: "/student/achievements", icon: Trophy },
+  { name: "My Learning",   href: "/student/my-courses",   icon: BookOpen },
   { name: "Messages",     href: "/messages",     icon: MessageSquare },
   { name: "Group Chats",  href: "/groups",       icon: Users },
   { name: "Calendar",      href: "/calendar",      icon: Home },
@@ -45,8 +44,7 @@ const studentNavigation = [
 const creatorNavigation = [
   { name: "Dashboard",    href: "/ContentCreator/dashboard",  icon: Home },
   { name: "My Courses",   href: "/ContentCreator/my-courses",   icon: BookOpen },
-  { name: "Achievements", href: "/ContentCreator/achievements", icon: Trophy },
-  { name: "Upload Video", href: "/ContentCreator/upload",    icon: BarChart3 },
+  { name: "My Learning",   href: "/student/my-courses",   icon: BookOpen },
   { name: "Go Live",      href: "/ContentCreator/go-live",   icon: BookOpen },
   { name: "Messages",     href: "/messages",     icon: MessageSquare },
   { name: "Group Chats",  href: "/groups",       icon: Users },
@@ -58,12 +56,11 @@ const creatorNavigation = [
 
 const specialistNavigation = [
   { name: "Dashboard",   href: "/specialist/dashboard", icon: Home },
+  { name: "My Learning",   href: "/student/my-courses",   icon: BookOpen },
   { name: "My Sessions", href: "/specialist/sessions",  icon: BookOpen },
-  { name: "Achievements", href: "/specialist/achievements", icon: Trophy },
   { name: "Messages",    href: "/messages",  icon: MessageSquare },
-  { name: "Group Chats",  href: "groups",       icon: Users },
+  { name: "Group Chats",  href: "/groups",       icon: Users },
   { name: "Calendar",      href: "/calendar",      icon: Home },
-  { name: "My Courses",   href: "/specialist/my-courses",   icon: BookOpen },
   { name: "My Bookings",      href: "/bookings",      icon: Home },
   { name: "My Feeds",      href: "/my-feeds",      icon: Home },
   { name: "Profile",     href: "/specialist/profile",   icon: User },
@@ -72,13 +69,12 @@ const specialistNavigation = [
 const parentNavigation = [
   { name: "Dashboard",   href: "/parent/dashboard", icon: Home },
   { name: "My Children", href: "/parent/children",  icon: Users },
-   { name: "My Courses",   href: "/parent/my-courses",   icon: BookOpen },
-  { name: "Achievements", href: "/parent/achievements", icon: Trophy },
-  { name: "Messages",    href: "/parent/messages",  icon: MessageSquare },
- { name: "Group Chats",  href: "/parent/groups",       icon: Users },
-  { name: "Calendar",      href: "/parent/calendar",      icon: Home },
+   { name: "My Learning",   href: "/student/my-courses",   icon: BookOpen },
+  { name: "Messages",    href: "/messages",  icon: MessageSquare },
+ { name: "Group Chats",  href: "/groups",       icon: Users },
+  { name: "Calendar",      href: "/calendar",      icon: Home },
   { name: "My Bookings",      href: "/bookings",      icon: Home },
-  { name: "My Feeds",      href: "/parent/my-feeds",      icon: Home },
+  { name: "My Feeds",      href: "/my-feeds",      icon: Home },
   { name: "Profile",     href: "/parent/profile",   icon: User },
 ];
 

@@ -203,11 +203,19 @@ export const videoProcessingService = {
   // ── Final save: chunk → real Lesson ──────────────────────────────────────────
 
   saveChunkAsLesson: async (
-    jobId: string,
-    chunkId: string,
-    payload: { title: string; transcript: string; order: number; isFree: boolean }
-  ): Promise<string> => {
-    const res = await api.post(`/videoprocessing/${jobId}/chunks/${chunkId}/save`, payload);
-    return res.data.data.lessonId as string;
-  },
+  jobId: string,
+  chunkId: string,
+  payload: {
+    title: string;
+    transcript: string;
+    order: number;
+    isFree: boolean;
+    duration: number;
+    startTime?: string;
+    endTime?: string;
+  }
+): Promise<string> => {
+  const res = await api.post(`/videoprocessing/${jobId}/chunks/${chunkId}/save`, payload);
+  return res.data.data.lessonId as string;
+},
 };

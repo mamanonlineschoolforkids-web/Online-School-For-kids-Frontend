@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import { authService } from "@/services/authService";
+import { useAuthStore } from "@/stores/authStore";
 
 // ─── Schemas ────────────────────────────────────────────────────────────────
 
@@ -116,6 +117,7 @@ export default function LoginPage() {
   const [searchParams] = useSearchParams();
   const { toast } = useToast();
   const navigate = useNavigate();
+  const { setUser, setToken } = useAuthStore();
 
   const {
     register,
@@ -212,10 +214,17 @@ export default function LoginPage() {
 
   const handleLoginSuccess = (authData: any) => {
     const userData = authData.user;
+    const accessToken = authData.accessToken ?? authData.access_token ?? "";
+    const refreshToken = authData.refreshToken ?? authData.refresh_token ?? "";
 
-    localStorage.setItem("user",          JSON.stringify(userData));
-    localStorage.setItem("access_token",  authData.accessToken  ?? authData.access_token  ?? "");
-    localStorage.setItem("refresh_token", authData.refreshToken ?? authData.refresh_token ?? "");
+    // Route through the Zustand store (which also persists to localStorage)
+    // rather than writing localStorage directly — components read auth state
+    // via useAuthStore(), and a raw localStorage write doesn't touch that
+    // in-memory state, so pages checking `user`/`token` would incorrectly
+    // still see the pre-login (logged-out) state until a full page refresh.
+    setUser(userData);
+    setToken(accessToken);
+    localStorage.setItem("refresh_token", refreshToken);
 
     const rolePathMap: Record<string, string> = {
       Student: "student", student: "student",
@@ -226,7 +235,12 @@ export default function LoginPage() {
     };
 
     const rolePath     = rolePathMap[userData.role] || "student";
-    const redirectPath = userData.isFirstLogin ? `/${rolePath}/profile` : "/";
+    const requestedRedirect = searchParams.get("redirect");
+    // Only ever redirect to an internal path — never follow an absolute/external URL here.
+    const isSafeInternalPath = requestedRedirect?.startsWith("/") && !requestedRedirect.startsWith("//");
+    const redirectPath = userData.isFirstLogin
+      ? `/${rolePath}/profile`
+      : (isSafeInternalPath ? requestedRedirect! : "/");
 
     toast({
       title: userData.isFirstLogin ? "Welcome to Ma'man!" : "Welcome back!",

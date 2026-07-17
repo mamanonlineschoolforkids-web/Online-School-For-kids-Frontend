@@ -26,6 +26,7 @@ export interface Post {
   reactionCounts: Record<string, number>;
   userReaction: ReactionType | null;
   createdAt: string;
+  updatedAt?: string;
   author?: PostAuthor;
   feedSection: "following" | "fof" | "public" | "profile";
 }
@@ -84,6 +85,15 @@ export const feedApi = {
     visibility?: Visibility;
   }): Promise<Post> => {
     const { data } = await api.post("/feed", payload);
+    return data;
+  },
+
+  // ── Update ──────────────────────────────────────────────────────────────────
+  updatePost: async (
+    postId: string,
+    payload: { content?: string; visibility?: Visibility; mediaUrls?: string[]; mediaType?: string }
+  ): Promise<Post> => {
+    const { data } = await api.put(`/feed/${postId}`, payload);
     return data;
   },
 

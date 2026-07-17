@@ -3,7 +3,7 @@ import { Link, useNavigate, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Layers, User, Users, Menu, X,
-  Bell, GraduationCap, Trophy, LogOut,
+  Bell, Trophy, LogOut,
   ChevronDown, Grid2X2, ShoppingCart,
   Heart, MessageSquare, LayoutDashboard,
 } from "lucide-react";
@@ -95,8 +95,8 @@ export function Navbar() {
 
           {/* Logo */}
           <Link to="/" className="flex items-center gap-2 shrink-0">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary">
-              <GraduationCap className="h-5 w-5 text-primary-foreground" />
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg ">
+              <img src="./Folder 1.webp" alt="Ma'man logo" className="h-8 w-8 object-contain" />
             </div>
             <span className="hidden font-display text-xl font-bold sm:inline-block">
               Ma'man
